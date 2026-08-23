@@ -1,0 +1,18 @@
+{
+  "name": "@gww/kit",
+  "version": "0.1.0",
+  "description": "Games With Words platform contract — the GameModule interface and arcade registry every game implements.",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
