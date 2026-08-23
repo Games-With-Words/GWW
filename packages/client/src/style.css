@@ -1,0 +1,130 @@
+/* Games With Words — party-dark, thumb-first. One hand, big targets, big type. */
+
+:root {
+  --bg: #0b0b13;
+  --panel: #15152233;
+  --card: #1a1a2b;
+  --ink: #f2f0ff;
+  --dim: #9a95c9;
+  --accent: #ffd166;   /* spotlight yellow */
+  --pop: #ef476f;      /* party pink */
+  --go: #06d6a0;       /* correct green */
+  --line: #2c2c46;
+  --radius: 18px;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+body {
+  font-family: Inter, system-ui, sans-serif;
+  min-height: 100dvh;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, #2b1a4d66, transparent),
+    radial-gradient(900px 500px at -10% 110%, #0f3d3a66, transparent),
+    var(--bg);
+}
+
+#app { max-width: 480px; margin: 0 auto; padding: 20px 18px calc(24px + env(safe-area-inset-bottom)); min-height: 100dvh; display: flex; flex-direction: column; }
+
+h1, h2, h3, .brand { font-family: Sora, Inter, sans-serif; }
+h1 { font-size: 2rem; font-weight: 800; line-height: 1.1; margin: 0.4em 0; }
+h2 { font-size: 1.3rem; margin: 0.4em 0; }
+.dim { color: var(--dim); }
+.small { font-size: 0.85rem; }
+
+.brand { font-weight: 800; letter-spacing: 0.02em; font-size: 1rem; color: var(--accent); text-transform: uppercase; }
+.tag { color: var(--dim); font-size: 0.9rem; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px;
+  margin: 10px 0;
+}
+
+button, .btn {
+  appearance: none; border: 0; cursor: pointer;
+  font: 600 1.05rem Inter, sans-serif;
+  border-radius: 14px; padding: 16px 20px; width: 100%;
+  background: var(--accent); color: #1a1405;
+  transition: transform 0.06s ease;
+}
+button:active { transform: scale(0.98); }
+button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+button.danger { background: var(--pop); color: #fff; }
+button.go { background: var(--go); color: #05231b; }
+button:disabled { opacity: 0.45; cursor: default; }
+
+input[type="text"] {
+  width: 100%; padding: 16px; border-radius: 14px;
+  border: 1px solid var(--line); background: #0f0f1c; color: var(--ink);
+  font: 500 1.1rem Inter, sans-serif;
+}
+input[type="text"]:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+.row { display: flex; gap: 10px; align-items: center; }
+.grow { flex: 1; }
+.stack > * + * { margin-top: 10px; }
+
+/* Arcade tiles */
+.tile { display: block; text-align: left; background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+.tile .maker { color: var(--accent); font-size: 0.85rem; font-weight: 600; }
+.tile h3 { margin: 4px 0; font-size: 1.4rem; }
+.tile.soon { opacity: 0.55; }
+
+/* Lobby */
+.code {
+  font-family: Sora, monospace; font-size: 2.4rem; font-weight: 800;
+  letter-spacing: 0.35em; text-align: center; color: var(--accent);
+  padding: 10px 0 4px;
+}
+.qr { display: flex; justify-content: center; padding: 8px; }
+.qr canvas { border-radius: 12px; background: #fff; padding: 10px; }
+.playerlist { list-style: none; padding: 0; margin: 8px 0; }
+.playerlist li { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--go); flex: none; }
+.dot.off { background: var(--line); }
+.hostmark { color: var(--accent); font-size: 0.8rem; }
+
+/* Game */
+.rolepill {
+  display: inline-block; font-weight: 800; font-family: Sora, sans-serif;
+  padding: 6px 14px; border-radius: 999px; font-size: 0.85rem; letter-spacing: 0.08em;
+}
+.rolepill.SPEAKER { background: var(--pop); color: #fff; }
+.rolepill.GUESSER { background: #22224039; color: var(--ink); border: 1px solid var(--line); }
+.rolepill.HOST { background: var(--accent); color: #1a1405; }
+
+.secretcard { border: 2px solid var(--pop); }
+.secretword { font-family: Sora, sans-serif; font-size: 2rem; font-weight: 800; text-align: center; padding: 6px 0; }
+.forbidden { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.forbidden span { background: #2b1220; color: #ff9db4; border: 1px solid #57223b; padding: 4px 10px; border-radius: 999px; font-size: 0.85rem; }
+
+.cluebox { font-family: Sora, sans-serif; font-size: 1.6rem; font-weight: 700; text-align: center; padding: 12px 0; }
+.budget { text-align: center; color: var(--dim); }
+
+.caption {
+  border-left: 3px solid var(--accent);
+  padding: 10px 14px; margin: 12px 0; color: var(--ink);
+  background: #14142250; border-radius: 0 12px 12px 0;
+  font-style: italic;
+}
+.caption .who { color: var(--accent); font-style: normal; font-weight: 700; font-size: 0.8rem; }
+
+.scores { width: 100%; border-collapse: collapse; }
+.scores td { padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.scores td:last-child { text-align: right; font-family: Sora, sans-serif; font-weight: 700; }
+.winner { color: var(--go); }
+
+.reveal { text-align: center; }
+.reveal .word { font-family: Sora, sans-serif; font-size: 1.8rem; font-weight: 800; color: var(--accent); }
+
+.error { background: #2b1220; border: 1px solid var(--pop); color: #ffb3c4; padding: 12px 14px; border-radius: 12px; margin: 10px 0; }
+
+footer { margin-top: auto; padding-top: 24px; text-align: center; color: var(--dim); font-size: 0.75rem; }
+footer a { color: var(--dim); }
+
+@media (prefers-reduced-motion: reduce) {
+  button:active { transform: none; }
+}
