@@ -15,6 +15,8 @@
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createReadStream, existsSync, statSync } from "node:fs";
+import { extname, join, normalize } from "node:path";
 import { createArcade, type Arcade } from "@gww/kit";
 import { sayLess } from "@gww/say-less";
 import { WebSocketServer, WebSocket } from "ws";
@@ -33,9 +35,22 @@ export interface Gateway {
   close(): Promise<void>;
 }
 
-export function createGateway(opts?: { log?: EventLog; now?: () => number }): Gateway {
+const MIME: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+  ".json": "application/json",
+  ".webmanifest": "application/manifest+json",
+};
+
+export function createGateway(opts?: { log?: EventLog; now?: () => number; clientDist?: string }): Gateway {
   const now = opts?.now ?? (() => Date.now());
   const log = opts?.log ?? new MemoryEventLog();
+  const clientDist = opts?.clientDist ?? process.env["GWW_CLIENT_DIST"];
   const rooms = new RoomStore();
   const sessions = new Map<string, GameSession>();
   // room.id -> player.id -> sockets (a player may hold more than one device/tab)
@@ -191,6 +206,24 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number }): Ga
         throw err;
       }
       return;
+    }
+
+    // Static client (spec §09 web client): everything that isn't API/WS is the
+    // app. SPA fallback to index.html so #/join deep links always resolve.
+    if (req.method === "GET" && clientDist !== undefined && !path.startsWith("/api/")) {
+      const safe = normalize(path).replace(/^(\.\.[/\\])+/, "");
+      let file = join(clientDist, safe === "/" ? "index.html" : safe);
+      if (!file.startsWith(clientDist) || !existsSync(file) || statSync(file).isDirectory()) {
+        file = join(clientDist, "index.html");
+      }
+      if (existsSync(file)) {
+        res.writeHead(200, {
+          "content-type": MIME[extname(file)] ?? "application/octet-stream",
+          "cache-control": file.endsWith("index.html") ? "no-cache" : "public, max-age=86400",
+        });
+        createReadStream(file).pipe(res);
+        return;
+      }
     }
 
     json(res, 404, { error: "NOT_FOUND", message: `No route ${req.method} ${path}` });
