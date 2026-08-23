@@ -1,0 +1,26 @@
+{
+  "name": "@gww/server",
+  "version": "0.1.0",
+  "description": "Games With Words platform server — private lobbies, realtime WebSocket gateway, server-authoritative game sessions.",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@gww/kit": "workspace:*",
+    "@gww/say-less": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.12",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
