@@ -15,6 +15,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { extractBlock } from "sentinel-blocks";
 
 /** The moments Ris hosts. Every cue has L0 text, cached audio, and a muse brief. */
 export type Cue =
@@ -119,31 +120,57 @@ export function voiceConfigFromEnv(): VoiceConfig {
   };
 }
 
+/** The sentinel tag muse wraps her finished line in. Think as long as you
+ *  like — the answer is whatever sits between the markers. */
+export const LINE_TAG = "LINE";
+
 const lineSystemPrompt = (cue: Cue): string =>
   "You are Ris, the host of Games With Words — a private, in-person party game " +
   "played by friends and family in one room. " + CUE_BRIEFS[cue] + " Rules: under 25 words; " +
   "warm, funny, a little mischievous; roast the MOMENT never a person; no emojis; " +
   "no quotation marks; no stage directions; plain speakable text only. " +
-  "Randomize your angle every time — never repeat a structure you have used before.";
+  "Randomize your angle every time — never repeat a structure you have used before.\n\n" +
+  "=== HOW TO ANSWER: SENTINEL BLOCKS ===\n" +
+  "Your reply is read by a machine that does NOT guess. It ignores everything " +
+  "you write except one clearly marked block, so you are free to think, weigh " +
+  "options, and change your mind as long as you like — none of it leaks into " +
+  "the show.\n\n" +
+  "A sentinel block is an opening marker on its own line, the payload, then a " +
+  "closing marker on its own line:\n\n" +
+  `<<<${LINE_TAG}>>>\n` +
+  "the finished line, exactly as it should be spoken\n" +
+  "<<<END>>>\n\n" +
+  "Rules for the block:\n" +
+  `1. Emit exactly ONE <<<${LINE_TAG}>>> block, and emit it LAST — it is how you say DONE.\n` +
+  "2. Between the markers: only the spoken line. No quotes, no label, no " +
+  "alternatives, no notes, no markdown, no trailing explanation.\n" +
+  "3. Both markers sit alone on their own lines, spelled exactly as shown.\n" +
+  "4. Anything outside the block is discarded — deliberate freely above it.\n\n" +
+  "Worked example (a different cue, same shape):\n" +
+  "Let me try a couple of angles... maybe something about the clock, or about " +
+  "the room going quiet. The clock one lands better.\n" +
+  `<<<${LINE_TAG}>>>\n` +
+  "Time's up and the word walks free, smug as ever.\n" +
+  "<<<END>>>";
 
-/** Deliberation vocabulary — lines carrying these are muse talking to
- *  herself, not Ris talking to the room. Seen live: she cached
- *  "Which to choose? Let's randomize with seed. Seed 178753538". */
-const META_RE =
-  /\b(seed|randomiz|which to choose|we need|the user|rules?:|under 25 words|opening line|exactly one|one line|no emojis|stage directions|let me|i should|i'll|i will|i'd|produce|option [a-z0-9]|draft|candidate|hmm\b|okay,? so)\b/i;
-
-/** Pull the best final-answer candidate out of a thinking blob: walk the
- *  lines from the END, skip deliberation, return the first line that both
- *  passes the gate and doesn't smell like reasoning. */
-export function lineFromThinking(thinking: string): string | undefined {
-  const lines = thinking
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const candidate = validateLine(lines[i]!);
-    if (candidate !== undefined && !META_RE.test(candidate)) return candidate;
+/**
+ * Pull Ris's finished line out of a completion using sentinel blocks.
+ *
+ * The model declares completion by wrapping the answer in <<<LINE>>>…<<<END>>>.
+ * We never guess which line of a reasoning stream is "the answer" — the old
+ * heuristic mined muse's scratchpad and voiced "I'll produce one line." into
+ * a WAV. Thinking is welcome and unbounded; only the block is read.
+ *
+ * Searches the answer channel first, then the thinking channel (thinking
+ * models routinely close the block inside their reasoning stream).
+ */
+export function lineFromCompletion(content: string, thinking = ""): string | undefined {
+  for (const channel of [content, thinking]) {
+    if (channel.length === 0) continue;
+    const block = extractBlock(channel, LINE_TAG);
+    if (block === null) continue;
+    const line = validateLine(block);
+    if (line !== undefined) return line;
   }
   return undefined;
 }
@@ -263,7 +290,12 @@ export class VoiceService {
         model: this.cfg.lineModel,
         messages: [
           { role: "system", content: lineSystemPrompt(cue) },
-          { role: "user", content: `Write tonight's opening line. Random seed: ${Math.floor(this.now() / 1000)}.` },
+          {
+            role: "user",
+            content:
+              `${CUE_BRIEFS[cue]} Take your time, then close with the ` +
+              `<<<${LINE_TAG}>>> block. Random seed: ${Math.floor(this.now() / 1000)}.`,
+          },
         ],
         temperature: 1.0,
         // NO token cap. muse thinks before she speaks — Mark's call: let her.
@@ -273,34 +305,37 @@ export class VoiceService {
     });
     if (!chatRes.ok) return { status: `line_failed_${chatRes.status}`, cue };
     const chat = (await chatRes.json()) as {
-      choices?: { message?: { content?: string; reasoning_content?: string }; text?: string }[];
+      choices?: {
+        finish_reason?: string;
+        message?: { content?: string; reasoning_content?: string; thinking?: string };
+        text?: string;
+      }[];
     };
-    const msg = chat.choices?.[0] as
-      | { message?: { content?: string; reasoning_content?: string; thinking?: string }; text?: string }
-      | undefined;
-    // Some model servers put the answer in nonstandard fields — take any of them.
-    // Last resort: the tail of the thinking stream, which validateLine will
-    // judge like any other candidate.
-    let raw = msg?.message?.content ?? "";
-    if (raw.length === 0) raw = msg?.text ?? "";
-    if (raw.length === 0) raw = msg?.message?.reasoning_content ?? "";
+    const msg = chat.choices?.[0];
     // Every muse response hits the log while we tune the pipeline — Mark's
     // call: the raw body is the ground truth, show it.
     console.log(`[voice] muse response (${cue}): ${JSON.stringify(chat).slice(0, 600)}`);
-    // content is the ANSWER channel — when it has text, judge it and stop.
-    // Mining message.thinking is a LAST resort for content:"" only; falling
-    // back past a real answer cached "I'll produce one line." (seen live).
-    let line: string | undefined;
-    if (raw.length > 0) {
-      line = validateLine(raw);
-    } else if ((msg?.message?.thinking ?? "").length > 0) {
-      line = lineFromThinking(msg!.message!.thinking!);
+
+    // The model says DONE by closing a sentinel block. A cut-off completion
+    // can't have closed one — fail loudly rather than parsing a fragment.
+    if (msg?.finish_reason === "length") {
+      console.log(`[voice] muse was TRUNCATED (finish_reason=length) — no cap is set, check the upstream limit`);
+      return { status: "line_truncated", cue };
     }
-    if (line !== undefined && META_RE.test(line)) line = undefined;
+
+    // Answer channel first, then thinking — some servers close the block
+    // inside the reasoning stream. Nonstandard `text` counts as content.
+    const content = msg?.message?.content ?? msg?.text ?? "";
+    const thinking = msg?.message?.thinking ?? msg?.message?.reasoning_content ?? "";
+    const line = lineFromCompletion(content, thinking);
     if (line === undefined) {
-      // Show WHAT was rejected — a bare "line_rejected" cost us a debugging loop.
-      // Print the TAIL — thinking models put the answer at the end.
-      console.log(`[voice] rejected muse output (${raw.length} chars), tail: ${JSON.stringify(raw.slice(-300))}`);
+      // Show WHAT was rejected, from BOTH channels — a bare "line_rejected",
+      // or a tail of the (usually empty) content, cost us debugging loops.
+      console.log(
+        `[voice] no usable <<<${LINE_TAG}>>> block. content(${content.length}) tail: ` +
+        `${JSON.stringify(content.slice(-200))} | thinking(${thinking.length}) tail: ` +
+        `${JSON.stringify(thinking.slice(-300))}`,
+      );
       return { status: "line_rejected", cue };
     }
 

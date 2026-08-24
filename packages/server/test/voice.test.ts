@@ -17,11 +17,16 @@ function cfg(overrides: Partial<VoiceConfig> = {}): VoiceConfig {
   };
 }
 
+/** muse answers the way the system prompt teaches her: thinking, then a block. */
+function museSays(line: string): string {
+  return `Weighing a couple of angles here before I commit.\n<<<LINE>>>\n${line}\n<<<END>>>`;
+}
+
 function fakeFetch(line: string, audioBytes = 4096): typeof fetch {
   return (async (url: RequestInfo | URL) => {
     const u = String(url);
     if (u.includes("/chat/completions")) {
-      return new Response(JSON.stringify({ choices: [{ message: { content: line } }] }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: museSays(line) } }] }), { status: 200 });
     }
     if (u.includes("/audio/speech")) {
       return new Response(new Uint8Array(audioBytes).fill(1), { status: 200, headers: { "content-type": "audio/wav" } });
@@ -108,7 +113,7 @@ describe("VoiceService", () => {
     const f = (async (url: RequestInfo | URL) => {
       const u = String(url);
       if (u.includes("/chat/completions")) {
-        return new Response(JSON.stringify({ choices: [{ message: { content: lines[Math.min(i++, 3)] } }] }), { status: 200 });
+        return new Response(JSON.stringify({ choices: [{ message: { content: museSays(lines[Math.min(i++, 3)]!) } }] }), { status: 200 });
       }
       return new Response(new Uint8Array(4096).fill(1), { status: 200 });
     }) as typeof fetch;
@@ -129,13 +134,53 @@ describe("VoiceService", () => {
     const f = (async (url: RequestInfo | URL) => {
       const u = String(url);
       if (u.includes("/chat/completions")) {
-        return new Response(JSON.stringify({ choices: [{ message: { content: "A perfectly good line that will fail to render tonight!" } }] }), { status: 200 });
+        return new Response(JSON.stringify({ choices: [{ message: { content: museSays("A perfectly good line that will fail to render tonight!") } }] }), { status: 200 });
       }
       return new Response("no operators", { status: 503 });
     }) as typeof fetch;
     const v2 = new VoiceService(cfg(), f);
     expect((await v2.replenishOnce()).status).toBe("tts_failed_503");
     expect(v2.pickIntro().audioFile).toBeUndefined();
+  });
+
+  it("refuses an answer muse never wrapped — no block, no render", async () => {
+    const f = (async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("/chat/completions")) {
+        return new Response(JSON.stringify({ choices: [{ message: { content: "A fine sounding line with no sentinel block at all." } }] }), { status: 200 });
+      }
+      return new Response(new Uint8Array(4096).fill(1), { status: 200 });
+    }) as typeof fetch;
+    const v = new VoiceService(cfg(), f);
+    expect((await v.replenishOnce()).status).toBe("line_rejected");
+    expect(v.generatedToday()).toBe(0);
+  });
+
+  it("refuses a truncated completion outright — a cut stream never closed its block", async () => {
+    const f = (async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("/chat/completions")) {
+        return new Response(JSON.stringify({ choices: [{ finish_reason: "length", message: { content: "<<<LINE>>>\nHalf a thought that got cut off mid" } }] }), { status: 200 });
+      }
+      return new Response(new Uint8Array(4096).fill(1), { status: 200 });
+    }) as typeof fetch;
+    const v = new VoiceService(cfg(), f);
+    expect((await v.replenishOnce()).status).toBe("line_truncated");
+    expect(v.generatedToday()).toBe(0);
+  });
+
+  it("reads the block out of the thinking channel when content is empty", async () => {
+    const f = (async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("/chat/completions")) {
+        return new Response(JSON.stringify({ choices: [{ message: { content: "", thinking: museSays("Ris found her voice inside the reasoning stream tonight!") } }] }), { status: 200 });
+      }
+      return new Response(new Uint8Array(4096).fill(1), { status: 200 });
+    }) as typeof fetch;
+    const v = new VoiceService(cfg(), f);
+    const r = await v.replenishOnce();
+    expect(r.status).toBe("ok");
+    expect(r.text).toBe("Ris found her voice inside the reasoning stream tonight!");
   });
 
   it("audioPath refuses anything but content-addressed names", () => {
@@ -174,20 +219,57 @@ cdesc("cue bank", () => {
   });
 });
 
-// ---- mining the answer out of a thinking blob (muse leaves content empty) ----
-import { lineFromThinking } from "../src/voice.js";
+// ---- sentinel blocks: the model declares DONE, we never guess ----
+import { lineFromCompletion, LINE_TAG } from "../src/voice.js";
 import { describe as tdesc, expect as texp, it as tit } from "vitest";
 
-tdesc("lineFromThinking", () => {
-  tit("skips deliberation and takes the real closing line", () => {
-    texp(lineFromThinking(
-      "Write tonight's opening line. Random seed: 178753.\nWe need EXACTLY ONE fresh opening line.\nWhich to choose? Let's randomize with seed.\nWelcome to game night, where friendship goes to be tested!",
-    )).toBe("Welcome to game night, where friendship goes to be tested!");
+const block = (line: string) => `<<<${LINE_TAG}>>>\n${line}\n<<<END>>>`;
+
+tdesc("lineFromCompletion (sentinel blocks)", () => {
+  tit("takes the block out of the answer channel", () => {
+    texp(lineFromCompletion(block("Welcome to game night, where friendship goes to be tested!")))
+      .toBe("Welcome to game night, where friendship goes to be tested!");
   });
-  tit("returns nothing when the whole blob is reasoning — no garbage renders", () => {
-    texp(lineFromThinking(
+
+  tit("ignores every word of deliberation around the block", () => {
+    const content =
+      "Let me weigh a few angles. Option A is about the clock, option B roasts the silence.\n" +
+      "I'll produce one line. Which to choose? Let's randomize with seed 178753538.\n" +
+      block("Time's up and the word walks free, smug as ever.") +
+      "\nThat should land well.";
+    texp(lineFromCompletion(content)).toBe("Time's up and the word walks free, smug as ever.");
+  });
+
+  tit("finds the block in the thinking channel when content is empty", () => {
+    const thinking =
+      "Write tonight's line. Random seed: 178753.\nWe need EXACTLY ONE fresh line.\n" +
+      block("Phones up, the clue just landed and the clock is unimpressed.");
+    texp(lineFromCompletion("", thinking))
+      .toBe("Phones up, the clue just landed and the clock is unimpressed.");
+  });
+
+  tit("prefers the answer channel over the thinking channel", () => {
+    texp(lineFromCompletion(block("The real answer wins every single time here."), block("The scratchpad answer loses.")))
+      .toBe("The real answer wins every single time here.");
+  });
+
+  tit("returns nothing when no block was ever closed — no garbage renders", () => {
+    texp(lineFromCompletion(
       "Write tonight's opening line. Random seed: 178753.\nWhich to choose? Let's randomize with seed. Seed 178753538",
     )).toBeUndefined();
-    texp(lineFromThinking("We need a line here.\nI'll produce one line.")).toBeUndefined();
+    texp(lineFromCompletion("We need a line here.\nI'll produce one line.")).toBeUndefined();
+    // The live regression: reasoning text reached the WAV because the parser
+    // mined a thinking blob. With sentinels, an unclosed block yields nothing.
+    texp(lineFromCompletion("", "I'll produce one line.")).toBeUndefined();
+  });
+
+  tit("still gates the block contents — muse can't smuggle junk through", () => {
+    texp(lineFromCompletion(block("too short"))).toBeUndefined();
+    texp(lineFromCompletion(block("Go read https://example.com for the rules of tonight."))).toBeUndefined();
+  });
+
+  tit("finishes a complete thought that forgot its period", () => {
+    texp(lineFromCompletion(block("Speaker's clue just landed, so drop the pause and start guessing fast")))
+      .toBe("Speaker's clue just landed, so drop the pause and start guessing fast.");
   });
 });

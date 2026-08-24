@@ -57,6 +57,9 @@ importers:
       '@gww/say-less':
         specifier: workspace:*
         version: link:../say-less
+      sentinel-blocks:
+        specifier: ^1.0.2
+        version: 1.0.2
       ws:
         specifier: ^8.18.0
         version: 8.21.3
@@ -564,6 +567,10 @@ packages:
     resolution: {integrity: sha512-/tqMfgP7GPA3PHhCmuiS4vIjrSVhHLgY++i+dhbG462euyAj7FpM4D9uq1X3BgjlqRdpcOrYhcQtfiQLNc8tqw==}
     engines: {node: '>=18.0.0', npm: '>=8.0.0'}
     hasBin: true
+
+  sentinel-blocks@1.0.2:
+    resolution: {integrity: sha512-etiXcqKc0vATYKwUHdwU2twd7MvDkrSObl1pC5vexs+ASDjw3nMTQkSOYN+pVr7soppcDZpOVc1tbR2T/jWq1g==}
+    engines: {node: '>=18'}
 
   set-blocking@2.0.0:
     resolution: {integrity: sha512-KiKBS8AnWGEyLzofFfmvKwpdPzqiy16LvQfK3yv/fVH7Bj13/wl3JSR1J+rfgRE9q7xUJK4qvgS8raSOeLUehw==}
@@ -1089,6 +1096,8 @@ snapshots:
       '@rollup/rollup-win32-x64-gnu': 4.62.5
       '@rollup/rollup-win32-x64-msvc': 4.62.5
       fsevents: 2.3.3
+
+  sentinel-blocks@1.0.2: {}
 
   set-blocking@2.0.0: {}
 
