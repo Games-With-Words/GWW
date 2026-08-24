@@ -80,19 +80,6 @@ const BRIEF = [
   "  Under 14 words. Roast the moment, never a person.",
 ].join("\n");
 
-interface RawCard {
-  secret?: unknown;
-  aliases?: unknown;
-  category?: unknown;
-  forbidden?: unknown;
-  budget?: unknown;
-  difficulty?: unknown;
-  revealLine?: unknown;
-}
-
-const isStringArray = (v: unknown): v is string[] =>
-  Array.isArray(v) && v.every((x) => typeof x === "string");
-
 export const sayLessCards: ContentSpec<Card> = {
   id: "say-less-cards",
   version: "1",

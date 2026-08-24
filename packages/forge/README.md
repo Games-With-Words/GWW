@@ -19,13 +19,34 @@ So: generate offline, gate hard, write to disk, load at boot.
 
 ## Run a pack
 
-```bash
-export AIAS_API_KEY=aai_...            # PIN, server-to-server
-export GWW_FORGE_MODEL=muse-local:latest   # or gemma4 — same spec, swap the flag
+| env var | default | what it does |
+|---|---|---|
+| `AIAS_API_KEY` | — | **required.** PIN key, server-to-server. |
+| `GWW_FORGE_MODEL` | `muse-local:latest` | Which model writes. Use the exact id from `models`. |
+| `GWW_FORGE_TEMP` | `1.0` | Sampling temperature. Variety is the point; lowering it makes packs samey. |
+| `AIAS_URL` | `https://aiassist.net` | PIN base url. |
+| `GWW_PACK_DIR` | `packs` | Where packs are written and read. |
 
-pnpm --filter @gww/forge build
+Run `models` first — it prints exactly what PIN serves, so the model id is a
+lookup instead of a guess:
+
+```bash
+export AIAS_API_KEY=aai_...
+node packages/forge/dist/cli.js models
+
+# then, per run — no export needed
+GWW_FORGE_MODEL=<exact-id> node packages/forge/dist/cli.js say-less-cards 40
+
+```
+
+Comparing two models is the same spec with a different id — identical brief,
+identical gate, so the accepted cards are the only variable. Note that a model
+tuned for *extraction* is not the same job as a model that *writes*: it may
+follow the block format perfectly and still produce dull cards. Compare the
+cards, not just the reject counts.
+
+```bash
 node packages/forge/dist/cli.js list
-node packages/forge/dist/cli.js say-less-cards 40
 node packages/forge/dist/cli.js ris-lines clue 8
 ```
 
