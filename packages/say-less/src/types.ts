@@ -53,6 +53,14 @@ export interface SessionConfig {
   guessTimeoutMs: number;
   /** Bonus window for fast answers (spec §04 scoring: within first 10 seconds). */
   fastAnswerMs: number;
+  /** Milliseconds the room gets to vote. Party games die on dead time. */
+  ballotTimeoutMs: number;
+  /**
+   * Fewest players for the community ballot to run at all.
+   * Below this the round goes straight from GUESSING to COMPLETE — two guesses
+   * is too thin a ballot to be worth the pause.
+   */
+  minPlayersForBallot: number;
 }
 
 export const DEFAULT_CONFIG: Omit<SessionConfig, "seed"> = {
@@ -61,13 +69,49 @@ export const DEFAULT_CONFIG: Omit<SessionConfig, "seed"> = {
   clueTimeoutMs: 45_000,
   guessTimeoutMs: 60_000,
   fastAnswerMs: 10_000,
+  ballotTimeoutMs: 15_000,
+  minPlayersForBallot: 4,
 };
 
 export type RoundPhase =
   | "AWAITING_CLUE"
   | "GUESSING"
-  | "VOTING" // SUSPICIOUS clue under room vote
+  /** SUSPICIOUS clue under room vote. NOT the community ballot — see BALLOT. */
+  | "VOTING"
+  /** Community ballot: guesses shown anonymously, room votes funniest + closest. */
+  | "BALLOT"
   | "COMPLETE";
+
+/** The two awards the room votes on. Independent; a guess can win both. */
+export type VoteCategory = "FUNNIEST" | "CLOSEST";
+
+/**
+ * One anonymized guess on the ballot.
+ *
+ * Deliberately carries NO player id. The owner mapping lives in a separate
+ * field (`ballotOwners`) so that broadcasting the ballot is safe by
+ * construction — leaking identity has to be an explicit act, not an oversight.
+ */
+export interface BallotSlot {
+  slotId: string;
+  text: string;
+}
+
+export interface VoteRecord {
+  voterId: string;
+  category: VoteCategory;
+  slotId: string;
+}
+
+/** What the board shows once the round is scored. Identity is revealed HERE. */
+export interface RoundReveal {
+  secret: string;
+  /** slotId -> playerId. The anonymity boundary drops at reveal, not before. */
+  owners: Record<string, string>;
+  correctPlayerIds: string[];
+  funniest: { slotId: string; playerId: string; votes: number }[];
+  closest: { slotId: string; playerId: string; votes: number }[];
+}
 
 export interface RoundState {
   index: number;
@@ -80,6 +124,13 @@ export interface RoundState {
   clueAcceptedAt?: number;
   /** playerId -> submitted (dedup, one guess per player per clue in v0.1 playtest rules). */
   guesses: GuessRecord[];
+  /** Anonymized, deterministically shuffled. Present from BALLOT onward. */
+  ballot?: BallotSlot[];
+  /** slotId -> playerId. Server-side only until the reveal. */
+  ballotOwners?: Record<string, string>;
+  votes: VoteRecord[];
+  reveal?: RoundReveal;
+  /** First correct guesser, by submission time. Undefined if nobody was right. */
   winnerId?: string;
   endedReason?: "CORRECT" | "TIMEOUT" | "HOST_ENDED" | "CLUE_REJECTED" | "VOTE_REJECTED";
 }
@@ -102,7 +153,9 @@ export interface ScoreEvent {
     | "UNUSED_WORDS"
     | "SPEAKER_FAST"
     | "GUESSER_FAST"
-    | "ALL_SOLVED";
+    | "ALL_SOLVED"
+    | "FUNNIEST"
+    | "CLOSEST";
   delta: number;
 }
 
@@ -136,6 +189,10 @@ export type EngineEvent =
   | { type: "clue.rejected"; roundIndex: number; reason: RejectionReason; detail: string }
   | { type: "guess.submitted"; roundIndex: number; playerId: string; value: string }
   | { type: "guess.accepted"; roundIndex: number; playerId: string }
+  | { type: "ballot.opened"; roundIndex: number; slots: BallotSlot[] }
+  | { type: "vote.submitted"; roundIndex: number; voterId: string; category: VoteCategory }
+  | { type: "ballot.closed"; roundIndex: number }
+  | { type: "round.revealed"; roundIndex: number; reveal: RoundReveal }
   | { type: "round.completed"; roundIndex: number; reason: NonNullable<RoundState["endedReason"]>; winnerId?: string; secret: string }
   | { type: "score.updated"; events: ScoreEvent[]; totals: Record<string, number> }
   | { type: "game.completed"; totals: Record<string, number> };

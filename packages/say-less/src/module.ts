@@ -9,6 +9,9 @@ import {
   startRound,
   submitClue,
   submitGuess,
+  submitVote,
+  closeGuessing,
+  closeBallot,
   resolveVote,
   endRound,
   EngineError,
@@ -44,6 +47,11 @@ interface VotePayload {
 }
 interface EndPayload {
   reason: "TIMEOUT" | "HOST_ENDED";
+}
+interface BallotVotePayload {
+  voterId: string;
+  category: "FUNNIEST" | "CLOSEST";
+  slotId: string;
 }
 
 /**
@@ -90,6 +98,15 @@ export const sayLess: GameModule<SessionState, EngineEvent> = {
         const p = payload as VotePayload;
         return resolveVote(state, p.allow, now);
       }
+      case "ballot.vote": {
+        const p = payload as BallotVotePayload;
+        return submitVote(state, p.voterId, p.category, p.slotId);
+      }
+      // Timers, driven by the server clock rather than a player action.
+      case "guessing.close":
+        return closeGuessing(state);
+      case "ballot.close":
+        return closeBallot(state);
       case "round.end": {
         const p = payload as EndPayload;
         return endRound(state, p.reason);

@@ -182,10 +182,20 @@ describe("realtime round", () => {
     await speaker.next("state");
     await wait(50);
 
-    // A guesser answers correctly; round completes and NOW the secret is public.
+    // A guesser answers correctly. The round does NOT end there any more —
+    // every guesser gets their turn first (round rework, 2026-08-24).
     const guesser = all.find((c) => c !== speaker)!;
     guesser.send({ type: "command", name: "guess.submit", payload: { value: secretWord } });
     await guesser.next("state");
+    await wait(50);
+    const midState = guesser.messages.filter((m) => m.type === "state").at(-1)!;
+    expect(midState.data.round.phase).toBe("GUESSING");
+
+    // The last guesser closes it. Three players is under the ballot floor, so
+    // the round completes immediately and the secret goes public.
+    const other = all.find((c) => c !== speaker && c !== guesser)!;
+    other.send({ type: "command", name: "guess.submit", payload: { value: "nowhere close" } });
+    await other.next("state");
     await wait(50);
 
     const completed = guesser.messages.find(
@@ -197,6 +207,95 @@ describe("realtime round", () => {
     const finalState = guesser.messages.filter((m) => m.type === "state").at(-1)!;
     expect(finalState.data.scores[guesser.playerId]).toBeGreaterThanOrEqual(150);
     void ris; void sonia;
+  });
+
+  it("never puts the ballot's owner map on the wire before the reveal", async () => {
+    // A five-player room clears the ballot floor. The anonymity guarantee is
+    // only real if it holds at the WIRE, not just in engine state — this is the
+    // test that would catch a projection leaking ballotOwners.
+    const created = await api("/api/rooms", {});
+    const joins = [];
+    for (const name of ["Mark", "Ris", "Sonia", "Sam", "Jo"]) {
+      joins.push(await api(`/api/rooms/${created.json.shortCode}/join`, { displayName: name }));
+    }
+    const board = await connectBoard(created.json.roomId, created.json.boardToken);
+    const clients = [];
+    for (const j of joins) clients.push(await connect(created.json.roomId, j.json.playerToken));
+
+    const hostClient = clients.find((c) => c.isHost) ?? clients[0]!;
+    hostClient.send({ type: "game.start", seed: 42 });
+    await hostClient.next("state");
+    await wait(60);
+
+    const speaker = clients.find((c) => c.sawType("secret"))!;
+    speaker.send({ type: "command", name: "clue.submit", payload: { clue: "totally safe generic hint" } });
+    await speaker.next("state");
+    await wait(60);
+
+    // Every guesser answers WRONG, so the ballot opens with four guesses.
+    const guessers = clients.filter((c) => c !== speaker);
+    for (const [i, g] of guessers.entries()) {
+      g.send({ type: "command", name: "guess.submit", payload: { value: `guess number ${i}` } });
+      await g.next("state");
+    }
+    await wait(80);
+
+    const state = board.messages.filter((m) => m.type === "state").at(-1)!;
+    expect(state.data.round.phase).toBe("BALLOT");
+    expect(state.data.round.ballot).toHaveLength(4);
+    // Slots carry text and an id — and nothing else.
+    for (const slot of state.data.round.ballot) {
+      expect(Object.keys(slot).sort()).toEqual(["slotId", "text"]);
+    }
+    // Nothing the board or any phone has EVER received maps a slot to a player.
+    for (const c of [board, ...clients]) {
+      expect(JSON.stringify(c.messages)).not.toContain("ballotOwners");
+    }
+
+    // A phone votes; the vote is attributed to the connected player, and the
+    // ballot still gives nothing away.
+    const voter = guessers[0]!;
+    const otherSlot = state.data.round.ballot.find(
+      (sl: { slotId: string; text: string }) => sl.text !== "guess number 0",
+    )!;
+    voter.send({ type: "command", name: "ballot.vote", payload: { category: "FUNNIEST", slotId: otherSlot.slotId } });
+    await voter.next("state");
+    await wait(60);
+    const after = board.messages.filter((m) => m.type === "state").at(-1)!;
+    expect(after.data.round.votedBy).toEqual([{ voterId: voter.playerId, category: "FUNNIEST" }]);
+  });
+
+  it("refuses a self-vote at the wire, where a phone cannot tell it is cheating", async () => {
+    const created = await api("/api/rooms", {});
+    const joins = [];
+    for (const name of ["A", "B", "C", "D", "E"]) {
+      joins.push(await api(`/api/rooms/${created.json.shortCode}/join`, { displayName: name }));
+    }
+    await connectBoard(created.json.roomId, created.json.boardToken);
+    const clients = [];
+    for (const j of joins) clients.push(await connect(created.json.roomId, j.json.playerToken));
+
+    const hostClient = clients.find((c) => c.isHost) ?? clients[0]!;
+    hostClient.send({ type: "game.start", seed: 9 });
+    await hostClient.next("state");
+    await wait(60);
+    const speaker = clients.find((c) => c.sawType("secret"))!;
+    speaker.send({ type: "command", name: "clue.submit", payload: { clue: "totally safe generic hint" } });
+    await speaker.next("state");
+    await wait(60);
+
+    const guessers = clients.filter((c) => c !== speaker);
+    for (const [i, g] of guessers.entries()) {
+      g.send({ type: "command", name: "guess.submit", payload: { value: `mine is ${i}` } });
+      await g.next("state");
+    }
+    await wait(80);
+
+    const st = guessers[0]!.messages.filter((m) => m.type === "state").at(-1)!;
+    const own = st.data.round.ballot.find((sl: { text: string }) => sl.text === "mine is 0")!;
+    guessers[0]!.send({ type: "command", name: "ballot.vote", payload: { category: "FUNNIEST", slotId: own.slotId } });
+    const err = await guessers[0]!.next("error");
+    expect(err.error).toBe("SELF_VOTE");
   });
 
   it("rejects wrong-role commands", async () => {

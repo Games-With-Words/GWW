@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createSession, startRound, submitClue, submitGuess, resolveVote, endRound } from "../src/machine.js";
+import { createSession, startRound, submitClue, submitGuess, resolveVote, endRound, closeBallot } from "../src/machine.js";
 import { STARTER_DECK } from "../src/deck.js";
 import { mulberry32, nextCycle } from "../src/rotation.js";
 import type { Player, SessionState } from "../src/types.js";
@@ -83,6 +83,17 @@ describe("session flow", () => {
 
     const other = players.find((p) => p.id !== sp && p.id !== guesser)!.id;
     t = submitGuess(s, other, secret, 5000);
+    s = t.state;
+    // A correct guess NO LONGER ends the round — everyone gets their turn,
+    // then the room votes. (Round rework, 2026-08-24.)
+    expect(s.round!.phase).toBe("GUESSING");
+
+    const third = players.find((p) => p.id !== sp && p.id !== guesser && p.id !== other)!.id;
+    t = submitGuess(s, third, "also wrong", 6000);
+    s = t.state;
+    // Four players clears the ballot floor, so the round pauses for the vote.
+    expect(s.round!.phase).toBe("BALLOT");
+    t = closeBallot(s);
     s = t.state;
     expect(s.round!.endedReason).toBe("CORRECT");
     expect(s.scores[other]).toBeGreaterThanOrEqual(150); // 100 + 50 first-correct

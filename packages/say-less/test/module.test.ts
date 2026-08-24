@@ -30,7 +30,12 @@ describe("arcade integration", () => {
     ({ state } = sayLess.command(state, "clue.submit", { speakerId: sp, clue: "totally safe generic hint" }, 100));
     const guesser = players.find((p) => p.id !== sp)!.id;
     const secret = state.round!.card.secret;
-    const t = sayLess.command(state, "guess.submit", { playerId: guesser, value: secret }, 500);
+    let t = sayLess.command(state, "guess.submit", { playerId: guesser, value: secret }, 500);
+    // A correct guess no longer ends the round; the last guess does. With 3
+    // players the room is under the ballot floor, so it completes right away.
+    expect(t.state.round!.phase).toBe("GUESSING");
+    const other = players.find((p) => p.id !== sp && p.id !== guesser)!.id;
+    t = sayLess.command(t.state, "guess.submit", { playerId: other, value: "nope" }, 600);
     expect(t.state.round!.endedReason).toBe("CORRECT");
     expect(SAY_LESS_MANIFEST.rulesVersion).toBe("say-less/1");
   });
