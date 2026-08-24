@@ -27,8 +27,8 @@ So: generate offline, gate hard, write to disk, load at boot.
 | `AIAS_URL` | `https://aiassist.net` | PIN base url. |
 | `GWW_PACK_DIR` | `packs` | Where packs are written and read. |
 
-Run `models` first — it prints exactly what PIN serves, so the model id is a
-lookup instead of a guess:
+Run `models` first — it reads the live PIN network list, so the model id is a
+lookup instead of a guess (the endpoint is `/api/v1/pin/network/models`):
 
 ```bash
 export AIAS_API_KEY=aai_...
@@ -39,11 +39,17 @@ GWW_FORGE_MODEL=<exact-id> node packages/forge/dist/cli.js say-less-cards 40
 
 ```
 
-Comparing two models is the same spec with a different id — identical brief,
-identical gate, so the accepted cards are the only variable. Note that a model
-tuned for *extraction* is not the same job as a model that *writes*: it may
-follow the block format perfectly and still produce dull cards. Compare the
-cards, not just the reject counts.
+Known writers on the network as of 2026-08-24: `muse-local:latest`,
+`muse-chat:latest`, `gemma4:26b`, `qwen3.6:27b`, plus the cloud models.
+
+**`gemma4-extract:31b` and `muse-extract:latest` are NOT writers.** They are
+tuned to pull structure out of text you hand them — the opposite job. They will
+follow the block format perfectly and write flat cards. `models` groups them
+separately for exactly this reason.
+
+Comparing two writers is the same spec with a different id — identical brief,
+identical gate, so the accepted cards are the only variable. Compare the cards,
+not just the reject counts.
 
 ```bash
 node packages/forge/dist/cli.js list

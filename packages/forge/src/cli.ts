@@ -34,24 +34,36 @@ async function main(): Promise<number> {
   const argv = process.argv.slice(2);
 
   if (argv[0] === "models") {
-    // Which line-writers does PIN actually serve? Beats guessing a tag.
+    // The real endpoint, read off the live OpenAPI spec rather than guessed:
+    // /api/v1/pin/network/models, returns { models: string[] }, no auth needed.
     const cfg = forgeConfigFromEnv();
-    if (cfg.apiKey === undefined || cfg.apiKey.length === 0) {
-      console.error("AIAS_API_KEY is not set.");
-      return 1;
-    }
-    const res = await fetch(`${cfg.aiasUrl}/api/v1/pin/models`, {
-      headers: { authorization: `Bearer ${cfg.apiKey}` },
+    const url = `${cfg.aiasUrl}/api/v1/pin/network/models`;
+    const res = await fetch(url, {
+      ...(cfg.apiKey !== undefined && cfg.apiKey.length > 0
+        ? { headers: { authorization: `Bearer ${cfg.apiKey}` } }
+        : {}),
     });
     if (!res.ok) {
-      console.error(`PIN returned HTTP ${res.status} for /models`);
+      console.error(`PIN returned HTTP ${res.status} for ${url}`);
       return 1;
     }
-    const body = (await res.json()) as { data?: { id?: string }[]; models?: { name?: string }[] };
-    const ids = (body.data ?? []).map((m) => m.id).concat((body.models ?? []).map((m) => m.name));
-    const found = ids.filter((i): i is string => typeof i === "string").sort();
-    console.log(found.length > 0 ? found.join("\n") : JSON.stringify(body).slice(0, 800));
+    const body = (await res.json()) as { models?: unknown };
+    const found = Array.isArray(body.models)
+      ? body.models.filter((m): m is string => typeof m === "string").sort()
+      : [];
+    if (found.length === 0) {
+      console.log(JSON.stringify(body).slice(0, 800));
+      return 0;
+    }
+    // Writers first — the -extract and tts entries are a different job.
+    const extract = found.filter((m) => /extract|^tts:|verif/.test(m));
+    const writers = found.filter((m) => !extract.includes(m));
+    console.log("writers (use one of these):");
+    for (const m of writers) console.log(`  ${m}`);
+    console.log("\nnot writers — extraction/TTS/verifier tunings:");
+    for (const m of extract) console.log(`  ${m}`);
     console.log(`\ncurrent: GWW_FORGE_MODEL=${cfg.model}`);
+    console.log(`example: GWW_FORGE_MODEL=gemma4:26b node dist/cli.js say-less-cards 40`);
     return 0;
   }
 
