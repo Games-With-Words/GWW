@@ -88,3 +88,21 @@ describe("client state reducer", () => {
     );
   });
 });
+
+// Regression: the board MUST connect with board=, never token= — a dropped
+// flag here put a production board in a silent auth-refusal loop (2026-08-23).
+import { wsUrl } from "../src/api.js";
+import { it as bit, expect as bexpect, describe as bdescribe } from "vitest";
+
+bdescribe("wsUrl credential selection", () => {
+  bit("board flag selects the board credential", () => {
+    bexpect(wsUrl("games-with-words.com", true, "r1", "tok", true)).toBe(
+      "wss://games-with-words.com/ws?room=r1&board=tok",
+    );
+  });
+  bit("players use the token credential", () => {
+    bexpect(wsUrl("games-with-words.com", true, "r1", "tok", false)).toBe(
+      "wss://games-with-words.com/ws?room=r1&token=tok",
+    );
+  });
+});

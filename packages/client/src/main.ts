@@ -97,6 +97,7 @@ function connect(rid: string, token: string, board: boolean): void {
     () => {
       if (screen.kind === "room") setTimeout(() => connect(roomId, myToken, asBoard), 1500);
     },
+    board,
   );
 }
 
