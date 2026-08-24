@@ -237,14 +237,10 @@ export class VoiceService {
           { role: "user", content: `Write tonight's opening line. Random seed: ${Math.floor(this.now() / 1000)}.` },
         ],
         temperature: 1.0,
-        // muse-local is a thinking model under ollama: it put the WHOLE output
-        // in message.thinking and returned content:"" (seen live). Ask it not
-        // to think — a one-line party quip needs vibes, not deliberation.
-        think: false,
-        // Thinking models spend tokens reasoning BEFORE the answer — 80 was
-        // fully consumed by the preamble and content came back empty (seen
-        // live: "rejected muse output (0 chars)"). Give the line room.
-        max_tokens: 500,
+        // muse thinks before she speaks — Mark's call: let her. The budget has
+        // to cover the FULL deliberation plus the line; 500 was still eaten by
+        // thinking (content:"" with a long message.thinking, seen live).
+        max_tokens: 8192,
       }),
     });
     if (!chatRes.ok) return { status: `line_failed_${chatRes.status}`, cue };
@@ -267,7 +263,8 @@ export class VoiceService {
     const line = validateLine(raw);
     if (line === undefined) {
       // Show WHAT was rejected — a bare "line_rejected" cost us a debugging loop.
-      console.log(`[voice] rejected muse output (${raw.length} chars): ${JSON.stringify(raw.slice(0, 200))}`);
+      // Print the TAIL — thinking models put the answer at the end.
+      console.log(`[voice] rejected muse output (${raw.length} chars), tail: ${JSON.stringify(raw.slice(-300))}`);
       return { status: "line_rejected", cue };
     }
 
