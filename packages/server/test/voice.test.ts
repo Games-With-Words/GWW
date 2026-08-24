@@ -49,6 +49,16 @@ describe("validateLine — the deterministic gate before a render is spent", () 
     );
   });
 
+  it("accepts a complete thought without a period and finishes it", () => {
+    expect(validateLine("Speaker's clue just landed, so drop the dramatic pause and start guessing fast")).toBe(
+      "Speaker's clue just landed, so drop the dramatic pause and start guessing fast.",
+    );
+  });
+
+  it("rejects a thought that trails off on a function word", () => {
+    expect(validateLine("Okay the speaker just got their secret word so everyone else")).toBeUndefined();
+  });
+
   it("strips think-blocks before judging the line", () => {
     expect(validateLine("<think>the user wants a party line, keep it short</think>Phones up, chaos out — welcome to Say Less!")).toBe(
       "Phones up, chaos out — welcome to Say Less!",
@@ -178,5 +188,6 @@ tdesc("lineFromThinking", () => {
     texp(lineFromThinking(
       "Write tonight's opening line. Random seed: 178753.\nWhich to choose? Let's randomize with seed. Seed 178753538",
     )).toBeUndefined();
+    texp(lineFromThinking("We need a line here.\nI'll produce one line.")).toBeUndefined();
   });
 });

@@ -130,7 +130,7 @@ const lineSystemPrompt = (cue: Cue): string =>
  *  herself, not Ris talking to the room. Seen live: she cached
  *  "Which to choose? Let's randomize with seed. Seed 178753538". */
 const META_RE =
-  /\b(seed|randomiz|which to choose|we need|the user|rules?:|under 25 words|opening line|exactly one|no emojis|stage directions|let me|i should|i'll go|i will go|option [a-z0-9]|draft|candidate|hmm\b|okay,? so)\b/i;
+  /\b(seed|randomiz|which to choose|we need|the user|rules?:|under 25 words|opening line|exactly one|one line|no emojis|stage directions|let me|i should|i'll|i will|i'd|produce|option [a-z0-9]|draft|candidate|hmm\b|okay,? so)\b/i;
 
 /** Pull the best final-answer candidate out of a thinking blob: walk the
  *  lines from the END, skip deliberation, return the first line that both
@@ -160,9 +160,13 @@ export function validateLine(raw: string): string | undefined {
   if (words.length < 4 || words.length > 30) return undefined;
   if (/https?:|<|>|\{|\}/.test(line)) return undefined;
   if (!/[a-zA-Z]/.test(line)) return undefined;
-  // A finished line ends like a sentence. Seen live: a mid-clause fragment
-  // ("...so everyone else") got rendered and cached. Hosts don't trail off.
-  if (!/[.!?…]$/.test(line)) return undefined;
+  // Unfinished thoughts end on function words ("...so everyone else").
+  // Complete thoughts missing a period get one — muse often skips it, and
+  // rejecting her real answer sent the miner into her scratchpad (seen live).
+  const lastWord = words[words.length - 1]!.toLowerCase().replace(/[^a-z']/g, "");
+  const DANGLING = new Set(["so", "and", "but", "or", "the", "a", "an", "to", "of", "with", "for", "else", "that", "which", "their", "your", "my", "his", "her", "its", "as", "at", "in", "on", "by", "is", "are", "was", "be"]);
+  if (DANGLING.has(lastWord)) return undefined;
+  if (!/[.!?…]$/.test(line)) line = `${line}.`;
   return line;
 }
 
@@ -283,10 +287,13 @@ export class VoiceService {
     // Every muse response hits the log while we tune the pipeline — Mark's
     // call: the raw body is the ground truth, show it.
     console.log(`[voice] muse response (${cue}): ${JSON.stringify(chat).slice(0, 600)}`);
-    // muse puts EVERYTHING in message.thinking (content stays empty) — mine
-    // the blob for the final answer, filtering out her inner monologue.
-    let line = raw.length > 0 ? validateLine(raw) : undefined;
-    if (line === undefined && (msg?.message?.thinking ?? "").length > 0) {
+    // content is the ANSWER channel — when it has text, judge it and stop.
+    // Mining message.thinking is a LAST resort for content:"" only; falling
+    // back past a real answer cached "I'll produce one line." (seen live).
+    let line: string | undefined;
+    if (raw.length > 0) {
+      line = validateLine(raw);
+    } else if ((msg?.message?.thinking ?? "").length > 0) {
       line = lineFromThinking(msg!.message!.thinking!);
     }
     if (line !== undefined && META_RE.test(line)) line = undefined;
