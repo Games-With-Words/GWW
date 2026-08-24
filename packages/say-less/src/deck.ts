@@ -2,6 +2,10 @@
  * L0 bundled starter deck — hand-authored, ships with the application, always available
  * (spec §07 cache hierarchy). This is the deck that makes the party start instantly
  * with zero inference. Expanded decks land in later PRs.
+ *
+ * Budgets follow the card's difficulty — 14 words for a warm-up up to 20 for a
+ * finale — because a harder secret needs more room to set up, not less. The
+ * engine caps each one by the cycle ceiling and floors it at MIN_CLUE_BUDGET.
  */
 
 import type { Card } from "./types.js";
@@ -13,7 +17,7 @@ export const STARTER_DECK: Card[] = [
     aliases: ["Jurassic", "Jurassic Park movie"],
     category: "Movies",
     forbidden: ["dinosaur", "movie", "island", "park"],
-    budget: 5,
+    budget: 16,
     difficulty: 2,
     revealLine: "They spared no expense. You spared no comprehension.",
   },
@@ -23,7 +27,7 @@ export const STARTER_DECK: Card[] = [
     aliases: ["the Titanic"],
     category: "Movies",
     forbidden: ["ship", "iceberg", "sink", "boat"],
-    budget: 5,
+    budget: 14,
     difficulty: 1,
     revealLine: "There was room on that door and room in that clue.",
   },
@@ -33,7 +37,7 @@ export const STARTER_DECK: Card[] = [
     aliases: ["Thanksgiving Day"],
     category: "Family",
     forbidden: ["turkey", "november", "holiday", "dinner"],
-    budget: 5,
+    budget: 14,
     difficulty: 1,
     revealLine: "Okay… that was technically a clue.",
   },
@@ -43,7 +47,7 @@ export const STARTER_DECK: Card[] = [
     aliases: ["the group chat"],
     category: "Family",
     forbidden: ["text", "phone", "message", "family"],
-    budget: 4,
+    budget: 16,
     difficulty: 2,
     revealLine: "Someone here is definitely muting it tonight.",
   },
@@ -53,7 +57,7 @@ export const STARTER_DECK: Card[] = [
     aliases: ["karaoke night"],
     category: "Music",
     forbidden: ["sing", "microphone", "bar", "song"],
-    budget: 4,
+    budget: 16,
     difficulty: 2,
     revealLine: "Confidence: 100. Pitch: unaccounted for.",
   },
@@ -63,7 +67,7 @@ export const STARTER_DECK: Card[] = [
     aliases: ["selfies"],
     category: "Pop Culture",
     forbidden: ["photo", "camera", "phone", "picture"],
-    budget: 3,
+    budget: 16,
     difficulty: 2,
     revealLine: "Front-facing evidence of a good time.",
   },
@@ -73,7 +77,7 @@ export const STARTER_DECK: Card[] = [
     aliases: ["roadtrip"],
     category: "Pop Culture",
     forbidden: ["car", "drive", "highway", "travel"],
-    budget: 4,
+    budget: 14,
     difficulty: 1,
     revealLine: "Are we there yet? The clue certainly wasn't.",
   },
@@ -83,7 +87,7 @@ export const STARTER_DECK: Card[] = [
     aliases: ["Home Alone movie"],
     category: "Movies",
     forbidden: ["kevin", "christmas", "burglar", "house"],
-    budget: 4,
+    budget: 16,
     difficulty: 2,
     revealLine: "The clue screamed. So did everyone else.",
   },
@@ -93,7 +97,7 @@ export const STARTER_DECK: Card[] = [
     aliases: ["the leftovers"],
     category: "Family",
     forbidden: ["food", "fridge", "tupperware", "dinner"],
-    budget: 3,
+    budget: 18,
     difficulty: 3,
     revealLine: "Tonight's winner: whoever called dibs first.",
   },
@@ -103,7 +107,7 @@ export const STARTER_DECK: Card[] = [
     aliases: ["air guitar solo"],
     category: "Music",
     forbidden: ["instrument", "pretend", "rock", "invisible"],
-    budget: 3,
+    budget: 18,
     difficulty: 3,
     revealLine: "Zero strings attached.",
   },
@@ -113,7 +117,7 @@ export const STARTER_DECK: Card[] = [
     aliases: ["the wifi password", "wifi code"],
     category: "Pop Culture",
     forbidden: ["internet", "router", "network", "connect"],
-    budget: 3,
+    budget: 18,
     difficulty: 3,
     revealLine: "The true test of any friendship.",
   },
@@ -123,7 +127,7 @@ export const STARTER_DECK: Card[] = [
     aliases: ["inside jokes"],
     category: "Family",
     forbidden: ["funny", "secret", "laugh", "joke"],
-    budget: 1,
+    budget: 20,
     difficulty: 4,
     revealLine: "You had to be there. Now you are.",
   },

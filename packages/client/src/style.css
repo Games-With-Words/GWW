@@ -64,7 +64,7 @@ button.danger { background: var(--pop); color: #fff; }
 button.go { background: var(--go); color: #05231b; }
 button:disabled { opacity: 0.45; cursor: default; }
 
-input[type="text"] {
+input[type="text"], textarea {
   width: 100%; padding: 16px; border-radius: 14px;
   border: 1px solid var(--line); background: #0f0f1c; color: var(--ink);
   /* 16px is the iOS zoom threshold — below it Safari zooms the page on focus
@@ -72,7 +72,23 @@ input[type="text"] {
   font: 500 max(16px, 1.05rem) Inter, sans-serif;
   min-height: 52px;
 }
-input[type="text"]:focus { outline: 2px solid var(--accent); border-color: transparent; }
+input[type="text"]:focus, textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+textarea {
+  resize: none; line-height: 1.45;
+  /* The clue is prose now, up to 20 words. Three rows holds that without the
+     text scrolling out of its own field mid-sentence. */
+  min-height: 92px;
+}
+
+/* The live word count. It is a CEILING readout, not a target — it stays quiet
+   until you actually cross it, then it is impossible to miss, because the
+   engine rejects an over-budget clue and burns the round doing it. */
+.wordcount {
+  text-align: right; font-variant-numeric: tabular-nums;
+  font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--dim);
+}
+.wordcount.over { color: var(--pop); font-weight: 700; }
 
 /* The composer — clue and guess entry.
    Found in live play: the form sat at the bottom of a growing page, so with

@@ -45,7 +45,7 @@ rock
 invisible
 <<<END>>>
 <<<FIELD budget>>>
-3
+15
 <<<END>>>
 <<<FIELD difficulty>>>
 3
@@ -56,8 +56,11 @@ Zero strings attached.
 
 const BRIEF = [
   "You write cards for Say Less, a party game played out loud by friends and",
-  "family in one room. One player (the Speaker) sees the secret and must get",
-  "the room to say it using as few words as possible. Fewer words scores more.",
+  "family in one room. One player (the Speaker) sees the secret and writes ONE",
+  "clue — a sentence or two — to get the room to say it out loud, without using",
+  "the forbidden words. The best clues are little stories, in-jokes and shared",
+  "memories, and the room repeats them back all night. Give the Speaker room to",
+  "write something, not a word puzzle to solve.",
   "",
   "A GREAT card is something everyone in a mixed-age room instantly recognizes",
   "once they hear it — a movie everybody has seen, a family ritual, an everyday",
@@ -73,8 +76,11 @@ const BRIEF = [
   "  ONE PER LINE.",
   "  They must NOT contain any word from the secret or its aliases — the card",
   "  has to stay playable. Block the obvious neighbours, not the answer itself.",
-  "- budget: clue word allowance, 1 to 7. Easy and concrete gets 5. Abstract",
-  "  gets 3. Only give 1 to something a single word can nail.",
+  "- budget: the clue's word CEILING, 6 to 20. The Speaker may write anything up",
+  "  to it and is never required to fill it. Be generous — a harder or more",
+  "  abstract secret needs MORE room, not less. Instantly recognizable gets 10.",
+  "  Abstract or specific gets 15 to 20. Only go near 6 when a short clue is",
+  "  genuinely the funnier constraint.",
   "- difficulty: 1 warm-up, 2 easy, 3 tricky, 4 finale.",
   "- revealLine: one short, dry, affectionate joke shown when the round ends.",
   "  Under 14 words. Roast the moment, never a person.",
@@ -82,7 +88,7 @@ const BRIEF = [
 
 export const sayLessCards: ContentSpec<Card> = {
   id: "say-less-cards",
-  version: "1",
+  version: "2",
   tag: "FIELD",
   payload: "fields",
   fields: CARD_FIELDS,
@@ -142,8 +148,8 @@ export const sayLessCards: ContentSpec<Card> = {
     }
 
     const budget = Number((f["budget"] ?? "").trim());
-    if (!Number.isInteger(budget) || budget < 1 || budget > 7) {
-      return { ok: false, reason: `budget must be an integer 1-7, got "${f["budget"] ?? ""}"` };
+    if (!Number.isInteger(budget) || budget < 6 || budget > 20) {
+      return { ok: false, reason: `budget must be an integer 6-20, got "${f["budget"] ?? ""}"` };
     }
     const difficulty = Number((f["difficulty"] ?? "").trim());
     if (difficulty !== 1 && difficulty !== 2 && difficulty !== 3 && difficulty !== 4) {

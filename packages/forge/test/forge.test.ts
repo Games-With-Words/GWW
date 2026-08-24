@@ -26,7 +26,7 @@ const goodCard: Record<string, string> = {
   aliases: "air guitar solo",
   category: "Music",
   forbidden: "instrument\npretend\nrock\ninvisible",
-  budget: "3",
+  budget: "15",
   difficulty: "3",
   revealLine: "Zero strings attached.",
 };
@@ -103,8 +103,13 @@ describe("say-less card gate — a bad card breaks a round, not just a line", ()
   });
 
   it("rejects out-of-range budget and difficulty", () => {
+    // A budget below the floor is the bug the first playtest found: a clue
+    // that short is a chore to write, so the gate refuses to author one.
     expect(sayLessCards.gate({ ...goodCard, budget: "0" }).ok).toBe(false);
-    expect(sayLessCards.gate({ ...goodCard, budget: "9" }).ok).toBe(false);
+    expect(sayLessCards.gate({ ...goodCard, budget: "3" }).ok).toBe(false);
+    expect(sayLessCards.gate({ ...goodCard, budget: "21" }).ok).toBe(false);
+    // The generous middle of the range is now the normal case, not an outlier.
+    expect(sayLessCards.gate({ ...goodCard, budget: "20" }).ok).toBe(true);
     expect(sayLessCards.gate({ ...goodCard, difficulty: "5" }).ok).toBe(false);
   });
 
@@ -471,7 +476,7 @@ describe("packs — additive, versioned, never overwritten", () => {
     const pack = JSON.parse(readFileSync(file, "utf8")) as { provenance: Record<string, string> };
     expect(pack.provenance.model).toBe("gemma4");
     expect(pack.provenance.specId).toBe("say-less-cards");
-    expect(pack.provenance.specVersion).toBe("1");
+    expect(pack.provenance.specVersion).toBe("2");
     expect(pack.provenance.promptHash).toMatch(/^[a-f0-9]{12}$/);
     expect(Date.parse(pack.provenance.generatedAt!)).not.toBeNaN();
   });

@@ -642,7 +642,7 @@ function renderBoardGame(s: RoomState): void {
 
   if (round !== undefined && round.phase !== "COMPLETE") {
     if (round.phase === "AWAITING_CLUE") {
-      app.append(el(`<div class="card reveal"><h2>${esc(nameOf(s, round.speakerId))} is composing a clue…</h2><p class="dim">Category: ${esc(round.category)} · ${round.budget}-word budget</p></div>`));
+      app.append(el(`<div class="card reveal"><h2>${esc(nameOf(s, round.speakerId))} is composing a clue…</h2><p class="dim">Category: ${esc(round.category)} · up to ${round.budget} words</p></div>`));
     } else {
       app.append(el(`<div class="card"><div class="cluebox">“${esc(round.clue ?? "")}”</div><div class="budget">— ${esc(nameOf(s, round.speakerId))}${round.phase === "VOTING" ? " · LOOPHOLE VOTE IN PROGRESS" : ""}</div></div>`));
       const bb = ballotBoard(s);
@@ -704,21 +704,48 @@ function renderPhoneGame(s: RoomState): void {
         <div class="small dim" style="text-align:center">YOUR SECRET · ${esc(c.card.category)} · don't say the red words</div>
         <div class="secretword">${esc(c.card.secret)}</div>
         <div class="forbidden">${c.card.forbidden.map((f) => `<span>${esc(f)}</span>`).join("")}</div>
-        <div class="budget">Get them to guess it in a ${c.budget}-word clue</div>
+        <div class="budget">Make them say it — up to ${c.budget} words</div>
       </div>`));
     } else {
       app.append(el(`<div class="card">Fetching your secret…</div>`));
     }
     if (round.phase === "AWAITING_CLUE") {
+      // A textarea, not an input: the budget now runs to 20 words, and a
+      // sentence that long scrolls out of sight in a single-line field on a
+      // phone. You cannot edit what you cannot read.
       const form = el(`<div class="card stack composer">
-        <input id="clue" type="text" placeholder="Your ${round.budget}-word clue"
-               autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="send" />
+        <textarea id="clue" rows="3" placeholder="Write the clue that makes them say it…"
+               autocomplete="off" autocorrect="on" spellcheck="false" enterkeyhint="send"></textarea>
+        <div id="count" class="wordcount">0 / ${round.budget} words</div>
         <button id="send">Send clue to the room</button>
       </div>`);
-      const input = form.querySelector("#clue") as HTMLInputElement;
-      const submit = () => { if (input.value.trim().length > 0) command("clue.submit", { clue: input.value.trim() }); };
-      form.querySelector("#send")!.addEventListener("click", submit);
-      input.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") submit(); });
+      const input = form.querySelector("#clue") as HTMLTextAreaElement;
+      const count = form.querySelector("#count") as HTMLElement;
+      const send = form.querySelector("#send") as HTMLButtonElement;
+      // The budget is a CEILING, never a quota — a three-word clue that lands is
+      // a perfectly good round. So the counter only ever objects to going OVER,
+      // and never nags you toward spending the rest of it.
+      const words = (): number => input.value.trim().split(/\s+/).filter((w) => w.length > 0).length;
+      const refresh = (): void => {
+        const n = words();
+        const over = n > round.budget;
+        count.textContent = over
+          ? `${n} / ${round.budget} words — ${n - round.budget} over`
+          : `${n} / ${round.budget} words`;
+        count.classList.toggle("over", over);
+        send.disabled = over || n === 0;
+      };
+      const submit = (): void => {
+        if (words() > 0 && words() <= round.budget) command("clue.submit", { clue: input.value.trim() });
+      };
+      input.addEventListener("input", refresh);
+      send.addEventListener("click", submit);
+      // Enter sends; Shift+Enter is a real newline, since this is prose now.
+      input.addEventListener("keydown", (e) => {
+        const ev = e as KeyboardEvent;
+        if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); submit(); }
+      });
+      refresh();
       app.append(form);
     } else if (round.phase === "GUESSING") {
       app.append(el(`<div class="card"><div class="cluebox">“${esc(round.clue ?? "")}”</div><div class="budget">Clue is out — watch them squirm.</div></div>`));
@@ -730,7 +757,7 @@ function renderPhoneGame(s: RoomState): void {
   // Everyone else: the clue and the one-shot guess.
   if (role !== "SPEAKER") {
     if (round.phase === "AWAITING_CLUE") {
-      app.append(el(`<div class="card"><h2>${esc(nameOf(s, round.speakerId))} is thinking…</h2><p class="dim">Category: ${esc(round.category)} · they get ${round.budget} words. Get ready.</p></div>`));
+      app.append(el(`<div class="card"><h2>${esc(nameOf(s, round.speakerId))} is thinking…</h2><p class="dim">Category: ${esc(round.category)} · up to ${round.budget} words. Get ready.</p></div>`));
     }
     if (round.phase === "GUESSING") {
       app.append(el(`<div class="card"><div class="cluebox">“${esc(round.clue ?? "")}”</div><div class="budget">by ${esc(nameOf(s, round.speakerId))} · what's the secret?</div></div>`));

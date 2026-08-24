@@ -43,7 +43,23 @@ export interface Player {
 export interface SessionConfig {
   /** Deterministic seed — same seed + same events = same session. */
   seed: number;
-  /** Escalating budgets by phase (spec §04 difficulty curve). Applied per full rotation cycle. */
+  /**
+   * Per-cycle CEILING on the clue length, in words. A clue must come in at or
+   * under it — spending the whole allowance is never required.
+   *
+   * This used to be [7, 5, 3, 1], tightening to a single word by the last
+   * rotation, and that was the worst design call in the game. A one-word budget
+   * is not a challenge, it is a chore: there is nothing to write, so nobody
+   * wants their turn. Playtest verdict, first outside player: "nobody wants to
+   * make a 1 word clue."
+   *
+   * So the curve now RISES. It opens tight while the room is still warming up
+   * and reading each other, then hands over real writing room once everyone is
+   * loose — by the late rounds a clue can be a whole shared memory, which is
+   * the thing people actually repeat back to each other afterwards. Tension
+   * comes from the clock and the forbidden words, never from a word count that
+   * makes the Speaker's job unpleasant.
+   */
   phaseBudgets: number[];
   /** Hard cap on total rounds. */
   maxRounds: number;
@@ -63,8 +79,17 @@ export interface SessionConfig {
   minPlayersForBallot: number;
 }
 
+/**
+ * The floor no round may go below, whatever the card or the cycle says.
+ *
+ * Six words is enough to build a sentence with a joke in it. Below that the
+ * Speaker is solving a puzzle instead of performing, which is the failure this
+ * whole change exists to undo.
+ */
+export const MIN_CLUE_BUDGET = 6;
+
 export const DEFAULT_CONFIG: Omit<SessionConfig, "seed"> = {
-  phaseBudgets: [7, 5, 3, 1],
+  phaseBudgets: [6, 8, 10, 15, 20],
   maxRounds: 24,
   clueTimeoutMs: 45_000,
   guessTimeoutMs: 60_000,

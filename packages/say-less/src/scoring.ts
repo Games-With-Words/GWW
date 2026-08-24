@@ -9,7 +9,23 @@ export const SCORING = {
   CORRECT_SPEAKER: 100,
   CORRECT_GUESSER: 100,
   FIRST_CORRECT_BONUS: 50,
-  UNUSED_WORD: 15,
+  /**
+   * Concision kicker, per unused word — deliberately small, and capped below.
+   *
+   * At 15 a point this was the strongest play in the game: on a 7-word budget a
+   * one-word clue paid the Speaker 90 bonus points on top of 100 for landing
+   * it. The scoring was paying people not to write, which is exactly the
+   * behaviour the first outside playtest complained about. Being brief is now a
+   * nod, not a strategy.
+   */
+  UNUSED_WORD: 4,
+  /**
+   * Ceiling on the concision kicker. Without it, raising budgets to 20 would
+   * have made terseness pay MORE, not less — 18 unused words at any rate at all
+   * outruns everything else on the board. Capped here it can never beat
+   * FUNNIEST, so the best available play is to write something worth hearing.
+   */
+  MAX_CONCISION: 24,
   FAST_SPEAKER: 40,
   FAST_GUESSER: 25,
   ALL_SOLVED_SPEAKER: 50,
@@ -62,7 +78,8 @@ export function scoreRound(round: RoundState, eligibleGuessers: number, config: 
   const used = round.clueNormalized === undefined ? round.budget : round.clueNormalized.split(" ").filter(Boolean).length;
   const unused = Math.max(0, round.budget - used);
   if (unused > 0) {
-    events.push({ roundIndex: r, playerId: round.speakerId, reason: "UNUSED_WORDS", delta: unused * SCORING.UNUSED_WORD });
+    const delta = Math.min(unused * SCORING.UNUSED_WORD, SCORING.MAX_CONCISION);
+    events.push({ roundIndex: r, playerId: round.speakerId, reason: "UNUSED_WORDS", delta });
   }
 
   if (round.clueAcceptedAt !== undefined && first.at - round.clueAcceptedAt <= config.fastAnswerMs) {

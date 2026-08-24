@@ -3,6 +3,7 @@ import { createSession, startRound, submitClue, submitGuess, resolveVote, endRou
 import { STARTER_DECK } from "../src/deck.js";
 import { mulberry32, nextCycle } from "../src/rotation.js";
 import type { Player, SessionState } from "../src/types.js";
+import { DEFAULT_CONFIG, MIN_CLUE_BUDGET } from "../src/types.js";
 
 const players: Player[] = [
   { id: "p1", displayName: "Mark" },
@@ -163,5 +164,65 @@ describe("session flow", () => {
       s = endRound(s, "HOST_ENDED").state;
     }
     expect(s.status).toBe("COMPLETE");
+  });
+});
+
+/**
+ * The clue budget. Untested until now, which is how the worst design call in
+ * the game survived to a live playtest: phaseBudgets ended at 1, and
+ * `startRound` ignored `card.budget` entirely, so every card got the same
+ * allowance no matter what the forge had gated. First outside player, first
+ * session: "nobody wants to make a 1 word clue."
+ */
+describe("clue budget — a ceiling you can write inside", () => {
+  const cardWith = (budget: number) => [{
+    id: "b1", secret: "Air guitar", aliases: [], category: "Music",
+    forbidden: ["instrument", "pretend", "rock"], budget, difficulty: 2 as const,
+  }];
+
+  it("NEVER hands out a budget too small to write a sentence in", () => {
+    // The regression guard. Whatever the config or the card says, every round
+    // has to be worth taking a turn on.
+    for (let cycle = 0; cycle < 12; cycle++) {
+      const s = { ...boot(), cycle } as SessionState;
+      const r = startRound(s).state.round!;
+      expect(r.budget).toBeGreaterThanOrEqual(MIN_CLUE_BUDGET);
+    }
+  });
+
+  it("opens up as the night goes on instead of clamping shut", () => {
+    const at = (cycle: number): number =>
+      startRound({ ...boot(), cycle } as SessionState).state.round!.budget;
+    // The curve rises: the room is cold early and loose later, so the writing
+    // room follows the energy rather than fighting it.
+    expect(at(0)).toBeLessThan(at(3));
+    expect(at(4)).toBeGreaterThanOrEqual(at(3));
+  });
+
+  it("lets the CARD ask for less than the cycle ceiling allows", () => {
+    // The card knows its secret. This is the wiring that did not exist.
+    const s = { ...boot(), cycle: 4, deck: cardWith(9), deckCursor: 0 } as SessionState;
+    expect(startRound(s).state.round!.budget).toBe(9);
+  });
+
+  it("floors a legacy card written against the old 1-7 range", () => {
+    // Packs already committed carry small budgets. They stay playable rather
+    // than becoming the exact round nobody wants.
+    const s = { ...boot(), cycle: 4, deck: cardWith(2), deckCursor: 0 } as SessionState;
+    expect(startRound(s).state.round!.budget).toBe(MIN_CLUE_BUDGET);
+  });
+
+  it("caps a greedy card at the cycle ceiling", () => {
+    const s = { ...boot(), cycle: 0, deck: cardWith(99), deckCursor: 0 } as SessionState;
+    const ceiling = DEFAULT_CONFIG.phaseBudgets[0]!;
+    expect(startRound(s).state.round!.budget).toBe(ceiling);
+  });
+
+  it("accepts a clue well under budget — the allowance is not a quota", () => {
+    let s = { ...boot(), cycle: 4, deck: cardWith(20), deckCursor: 0 } as SessionState;
+    const t = startRound(s);
+    const round = t.state.round!;
+    const short = submitClue(t.state, round.speakerId, "six strings, zero strings", 1_000);
+    expect(short.state.round!.phase).toBe("GUESSING");
   });
 });

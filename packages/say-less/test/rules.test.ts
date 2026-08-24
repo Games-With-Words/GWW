@@ -104,7 +104,7 @@ const card = (secret: string, aliases: string[] = []): FCard => ({
 });
 
 fdesc("fuzzy guess matching", () => {
-  fit("still accepts everything the exact matcher accepted", () => {
+  it("still accepts everything the exact matcher accepted", () => {
     fexp(fmatch(card("Jurassic Park"), "jurassic park")).toBe(true);
     fexp(fmatch(card("Jurassic Park"), "  JURASSIC   PARK  ")).toBe(true);
     fexp(fmatch(card("Don't Look Up"), "dont look up")).toBe(true);
@@ -112,20 +112,20 @@ fdesc("fuzzy guess matching", () => {
     fexp(fmatch(card("Titanic", ["the Titanic"]), "the titanic")).toBe(true);
   });
 
-  fit("forgives the typo that used to lose a round", () => {
+  it("forgives the typo that used to lose a round", () => {
     fexp(fmatch(card("Jurassic Park"), "jurassic parc")).toBe(true);
     fexp(fmatch(card("Thanksgiving"), "thanksgivng")).toBe(true);
     fexp(fmatch(card("Karaoke"), "karoake")).toBe(true);
   });
 
-  fit("forgives singular and plural in both directions", () => {
+  it("forgives singular and plural in both directions", () => {
     fexp(fmatch(card("Wet socks"), "wet sock")).toBe(true);
     fexp(fmatch(card("Leftover"), "leftovers")).toBe(true);
     fexp(fmatch(card("Inside jokes"), "inside joke")).toBe(true);
     fexp(fmatch(card("Box"), "boxes")).toBe(true);
   });
 
-  fit("REFUSES to make short words interchangeable — the reason for length scaling", () => {
+  it("REFUSES to make short words interchangeable — the reason for length scaling", () => {
     // A flat distance of 2 would accept every one of these. All must fail.
     fexp(fmatch(card("Dip"), "tip")).toBe(false);
     fexp(fmatch(card("Dip"), "top")).toBe(false);
@@ -134,23 +134,23 @@ fdesc("fuzzy guess matching", () => {
     fexp(fmatch(card("Wine"), "wife")).toBe(false);
   });
 
-  fit("refuses a genuinely different answer of any length", () => {
+  it("refuses a genuinely different answer of any length", () => {
     fexp(fmatch(card("Jurassic Park"), "jurassic world")).toBe(false);
     fexp(fmatch(card("Thanksgiving"), "christmas")).toBe(false);
     fexp(fmatch(card("Road trip"), "road rage")).toBe(false);
   });
 
-  fit("refuses a guess with the wrong number of words", () => {
+  it("refuses a guess with the wrong number of words", () => {
     fexp(fmatch(card("Air guitar"), "guitar")).toBe(false);
     fexp(fmatch(card("Karaoke"), "karaoke night")).toBe(false);
     fexp(fmatch(card("Air guitar"), "")).toBe(false);
   });
 
-  fit("applies the same tolerance to aliases", () => {
+  it("applies the same tolerance to aliases", () => {
     fexp(fmatch(card("Group chat", ["the group chat"]), "the groop chat")).toBe(true);
   });
 
-  fit("gives a token tolerance only when its neighbours corroborate it", () => {
+  it("gives a token tolerance only when its neighbours corroborate it", () => {
     // Uncorroborated (single-word answer): short words must be exact.
     fexp(editBudget("dip", false)).toBe(0);
     fexp(editBudget("cake", false)).toBe(0);
@@ -161,17 +161,17 @@ fdesc("fuzzy guess matching", () => {
     fexp(editBudget("cake", true)).toBe(1);
   });
 
-  fit("refuses two wrong words — that is a different answer, not a typo", () => {
+  it("refuses two wrong words — that is a different answer, not a typo", () => {
     fexp(fmatch(card("Group chat"), "groop chit")).toBe(false);
   });
 
-  fit("does not let a long phrase's budget rescue a genuinely wrong word", () => {
+  it("does not let a long phrase's budget rescue a genuinely wrong word", () => {
     // "jurassic park" has a 2-edit budget, but a wrong second word blows past it.
     fexp(fmatch(card("Jurassic Park"), "jurassic shark")).toBe(false);
     fexp(fmatch(card("Group chat"), "group chair")).toBe(false);
   });
 
-  fit("measures edit distance and bails out early past the cap", () => {
+  it("measures edit distance and bails out early past the cap", () => {
     fexp(editDistance("parc", "park", 2)).toBe(1);
     fexp(editDistance("same", "same", 2)).toBe(0);
     fexp(editDistance("kitten", "sitting", 3)).toBe(3);
@@ -179,7 +179,7 @@ fdesc("fuzzy guess matching", () => {
     fexp(editDistance("abc", "xyzxyz", 1)).toBe(2);
   });
 
-  fit("strips plurals without mangling words that just end in s", () => {
+  it("strips plurals without mangling words that just end in s", () => {
     fexp(singular("socks")).toBe("sock");
     fexp(singular("boxes")).toBe("box");
     fexp(singular("parties")).toBe("party");

@@ -22,7 +22,7 @@ import type {
   SessionState,
   VoteCategory,
 } from "./types.js";
-import { DEFAULT_CONFIG } from "./types.js";
+import { DEFAULT_CONFIG, MIN_CLUE_BUDGET } from "./types.js";
 
 export interface Transition {
   state: SessionState;
@@ -70,10 +70,22 @@ export function createSession(
   };
 }
 
-function currentBudget(state: SessionState): number {
+/**
+ * The clue allowance for one round: the card's own suggestion, capped by the
+ * cycle ceiling, floored so it is always writable.
+ *
+ * `card.budget` was dead weight until now — every card the forge ever gated
+ * carried one and `startRound` never read it, so an abstract finale card and a
+ * one-word gimme got the identical allowance. The card knows how much room its
+ * secret needs; the cycle decides how much room the game is willing to give.
+ * The floor overrules both, which is also what keeps older packs playable after
+ * the range moved up.
+ */
+function roundBudget(state: SessionState, card: Card): number {
   const budgets = state.config.phaseBudgets;
   const phase = Math.min(state.cycle, budgets.length - 1);
-  return budgets[phase] ?? budgets[budgets.length - 1] ?? 5;
+  const ceiling = budgets[phase] ?? budgets[budgets.length - 1] ?? MIN_CLUE_BUDGET;
+  return Math.max(MIN_CLUE_BUDGET, Math.min(card.budget, ceiling));
 }
 
 export function startRound(state: SessionState): Transition {
@@ -97,7 +109,7 @@ export function startRound(state: SessionState): Transition {
 
   const speakerId = s.rotation[s.rotationCursor]!;
   const card = s.deck[s.deckCursor]!;
-  const budget = currentBudget(s);
+  const budget = roundBudget(s, card);
   const round: RoundState = {
     index: s.roundIndex,
     speakerId,
