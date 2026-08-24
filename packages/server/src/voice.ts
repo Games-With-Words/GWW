@@ -126,6 +126,28 @@ const lineSystemPrompt = (cue: Cue): string =>
   "no quotation marks; no stage directions; plain speakable text only. " +
   "Randomize your angle every time — never repeat a structure you have used before.";
 
+/** Deliberation vocabulary — lines carrying these are muse talking to
+ *  herself, not Ris talking to the room. Seen live: she cached
+ *  "Which to choose? Let's randomize with seed. Seed 178753538". */
+const META_RE =
+  /\b(seed|randomiz|which to choose|we need|the user|rules?:|under 25 words|opening line|exactly one|no emojis|stage directions|let me|i should|i'll go|i will go|option [a-z0-9]|draft|candidate|hmm\b|okay,? so)\b/i;
+
+/** Pull the best final-answer candidate out of a thinking blob: walk the
+ *  lines from the END, skip deliberation, return the first line that both
+ *  passes the gate and doesn't smell like reasoning. */
+export function lineFromThinking(thinking: string): string | undefined {
+  const lines = thinking
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const candidate = validateLine(lines[i]!);
+    if (candidate !== undefined && !META_RE.test(candidate)) return candidate;
+  }
+  return undefined;
+}
+
 /** Deterministic sanity gate for generated lines — reject junk before it costs a render. */
 export function validateLine(raw: string): string | undefined {
   // Local models often narrate before they answer — strip reasoning blocks
@@ -255,11 +277,16 @@ export class VoiceService {
     let raw = msg?.message?.content ?? "";
     if (raw.length === 0) raw = msg?.text ?? "";
     if (raw.length === 0) raw = msg?.message?.reasoning_content ?? "";
-    if (raw.length === 0) raw = msg?.message?.thinking ?? "";
     // Every muse response hits the log while we tune the pipeline — Mark's
     // call: the raw body is the ground truth, show it.
     console.log(`[voice] muse response (${cue}): ${JSON.stringify(chat).slice(0, 600)}`);
-    const line = validateLine(raw);
+    // muse puts EVERYTHING in message.thinking (content stays empty) — mine
+    // the blob for the final answer, filtering out her inner monologue.
+    let line = raw.length > 0 ? validateLine(raw) : undefined;
+    if (line === undefined && (msg?.message?.thinking ?? "").length > 0) {
+      line = lineFromThinking(msg!.message!.thinking!);
+    }
+    if (line !== undefined && META_RE.test(line)) line = undefined;
     if (line === undefined) {
       // Show WHAT was rejected — a bare "line_rejected" cost us a debugging loop.
       // Print the TAIL — thinking models put the answer at the end.

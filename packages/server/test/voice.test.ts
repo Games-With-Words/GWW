@@ -81,7 +81,7 @@ describe("VoiceService", () => {
   });
 
   it("dedupes identical lines instead of re-rendering them", async () => {
-    const v = new VoiceService(cfg(), fakeFetch("Same exact opening line every single time folks!"));
+    const v = new VoiceService(cfg(), fakeFetch("Same exact welcome greeting every single time folks!"));
     expect((await v.replenishOnce()).status).toBe("ok");
     expect((await v.replenishOnce()).status).toBe("duplicate");
     expect(v.generatedToday()).toBe(1);
@@ -90,10 +90,10 @@ describe("VoiceService", () => {
   it("enforces the daily budget — max N renders, then budget_exhausted", async () => {
     let i = 0;
     const lines = [
-      "Fresh opening line number one for the lovely room!",
-      "Fresh opening line number two, even better than one!",
-      "Fresh opening line number three, the trilogy concludes!",
-      "Fresh opening line number four should never be rendered!",
+      "Fresh welcome number one for the lovely room tonight!",
+      "Fresh welcome number two, even better than the first!",
+      "Fresh welcome number three, the trilogy concludes tonight!",
+      "Fresh welcome number four should never be rendered tonight!",
     ];
     const f = (async (url: RequestInfo | URL) => {
       const u = String(url);
@@ -161,5 +161,22 @@ cdesc("cue bank", () => {
     cexp(CUES).toContain(r.cue!);
     const line = v.pickLine(r.cue!);
     cexp(line.audioFile).toBeDefined();
+  });
+});
+
+// ---- mining the answer out of a thinking blob (muse leaves content empty) ----
+import { lineFromThinking } from "../src/voice.js";
+import { describe as tdesc, expect as texp, it as tit } from "vitest";
+
+tdesc("lineFromThinking", () => {
+  tit("skips deliberation and takes the real closing line", () => {
+    texp(lineFromThinking(
+      "Write tonight's opening line. Random seed: 178753.\nWe need EXACTLY ONE fresh opening line.\nWhich to choose? Let's randomize with seed.\nWelcome to game night, where friendship goes to be tested!",
+    )).toBe("Welcome to game night, where friendship goes to be tested!");
+  });
+  tit("returns nothing when the whole blob is reasoning — no garbage renders", () => {
+    texp(lineFromThinking(
+      "Write tonight's opening line. Random seed: 178753.\nWhich to choose? Let's randomize with seed. Seed 178753538",
+    )).toBeUndefined();
   });
 });
