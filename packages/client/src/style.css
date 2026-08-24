@@ -199,6 +199,43 @@ footer a { color: var(--dim); }
 }
 .clock.urgent { color: var(--pop); }
 
+/* ---- The community ballot -------------------------------------------------
+   Anonymous guesses, two buttons each. Designed for a thumb in a loud room:
+   the row is the tap target's neighbour, not its competitor. */
+.ballot { list-style: none; padding: 0; margin: 4px 0; }
+.ballotrow {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 4px; border-bottom: 1px solid var(--line);
+}
+.ballotrow .slot {
+  flex: 1; font-family: Sora, sans-serif; font-weight: 600;
+  font-size: clamp(1rem, 4.5vw, 1.15rem);
+  overflow-wrap: anywhere;
+}
+.votebtns { display: flex; gap: 8px; flex: none; }
+button.vote {
+  width: 52px; min-width: 52px; min-height: 52px; padding: 0;
+  font-size: 1.4rem; line-height: 1; border-radius: 14px;
+  background: #22224039; border: 1px solid var(--line); color: var(--ink);
+}
+button.vote.funny:active { background: var(--accent); }
+button.vote.close:active { background: var(--go); }
+button.vote:disabled { opacity: 0.25; }
+
+/* Reveal badges */
+.badge {
+  display: inline-block; font-size: 0.65rem; font-weight: 800;
+  letter-spacing: 0.06em; padding: 2px 7px; border-radius: 999px;
+  margin-left: 6px; vertical-align: middle;
+}
+.badge.hit { background: var(--go); color: #05231b; }
+.badge.funny { background: var(--accent); color: #1a1405; }
+.badge.close { background: var(--pop); color: #fff; }
+
+/* On the board the ballot is a reading surface, not a control surface. */
+#app.board .ballotrow .slot { font-size: 2rem; }
+#app.board .ballot { margin: 12px 0; }
+
 /* Guess feed — the comedy record */
 .guessfeed { list-style: none; padding: 0; margin: 4px 0; }
 .guessfeed li { padding: 6px 4px; border-bottom: 1px solid var(--line); }
