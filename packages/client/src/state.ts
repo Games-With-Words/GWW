@@ -20,8 +20,12 @@ export interface PublicRound {
   clue?: string;
   guessCount: number;
   guessedPlayerIds: string[];
+  /** Public guess feed — wrong guesses are half the comedy. */
+  guesses: { playerId: string; value: string; correct: boolean }[];
   winnerId?: string;
   endedReason?: string;
+  /** Card's reveal line, public once the round completes. */
+  revealLine?: string;
 }
 
 export interface PublicGameState {
@@ -30,6 +34,9 @@ export interface PublicGameState {
   maxRounds: number;
   scores: Record<string, number>;
   round?: PublicRound;
+  /** Server-time deadline of the running phase timer (countdowns). */
+  deadline?: number;
+  serverTime?: number;
 }
 
 export interface SecretCard {
@@ -54,6 +61,8 @@ export interface RevealInfo {
 export interface RoomState {
   playerId: string;
   isHost: boolean;
+  /** True when this device is the display board (desktop/TV). */
+  isBoard: boolean;
   roomState: string;
   players: PresencePlayer[];
   game?: PublicGameState | undefined;
@@ -63,10 +72,25 @@ export interface RoomState {
   caption?: string | undefined;
   error?: string | undefined;
   flagged?: { roundIndex: number; reason: string } | undefined;
+  /** Client-clock timestamp when the latest state arrived (countdown anchor). */
+  stateReceivedAt?: number | undefined;
 }
 
-export function initialRoom(playerId: string, isHost: boolean, roomState: string): RoomState {
-  return { playerId, isHost, roomState, players: [] };
+export function initialRoom(playerId: string, isHost: boolean, roomState: string, isBoard = false): RoomState {
+  return { playerId, isHost, isBoard, roomState, players: [] };
+}
+
+/** Host badge follows presence — the server assigns it randomly at game start. */
+export function amHost(s: RoomState): boolean {
+  return s.players.find((p) => p.id === s.playerId)?.isHost ?? s.isHost;
+}
+
+/** Milliseconds left on the phase clock, clamped at zero. */
+export function msLeft(s: RoomState, clientNow: number): number | undefined {
+  const g = s.game;
+  if (g?.deadline === undefined || g.serverTime === undefined) return undefined;
+  // Anchor to server time to survive client clock skew.
+  return Math.max(0, g.deadline - g.serverTime - (clientNow - (s.stateReceivedAt ?? clientNow)));
 }
 
 function captionFor(s: RoomState, ev: { type: string; [k: string]: unknown }): string | undefined {
@@ -111,6 +135,7 @@ export function reduce(s: RoomState, msg: { type: string; [k: string]: unknown }
       return {
         ...s,
         game,
+        stateReceivedAt: Date.now(),
         secret: changedRound ? undefined : s.secret,
         flagged: game.round?.phase === "VOTING" ? s.flagged : undefined,
       };
@@ -147,11 +172,12 @@ export function reduce(s: RoomState, msg: { type: string; [k: string]: unknown }
 }
 
 /** What role does this device hold right now? */
-export function roleOf(s: RoomState): "HOST" | "SPEAKER" | "GUESSER" {
+export function roleOf(s: RoomState): "BOARD" | "HOST" | "SPEAKER" | "GUESSER" {
+  if (s.isBoard) return "BOARD";
   if (s.game?.round !== undefined && s.game.round.phase !== "COMPLETE" && s.game.round.speakerId === s.playerId) {
     return "SPEAKER";
   }
-  return s.isHost ? "HOST" : "GUESSER";
+  return amHost(s) ? "HOST" : "GUESSER";
 }
 
 export function nameOf(s: RoomState, playerId: string | undefined): string {

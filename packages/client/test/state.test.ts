@@ -37,28 +37,28 @@ describe("client state reducer", () => {
     expect(roleOf(s)).toBe("GUESSER");
     s = reduce(s, {
       type: "state",
-      data: { status: "IN_ROUND", roundIndex: 0, maxRounds: 12, scores: {}, round: { index: 0, speakerId: "p1", budget: 5, phase: "AWAITING_CLUE", category: "Movies", guessCount: 0, guessedPlayerIds: [] } },
+      data: { status: "IN_ROUND", roundIndex: 0, maxRounds: 12, scores: {}, round: { index: 0, speakerId: "p1", budget: 5, phase: "AWAITING_CLUE", category: "Movies", guessCount: 0, guessedPlayerIds: [], guesses: [] } },
     });
     expect(roleOf(s)).toBe("SPEAKER");
     const host = reduce(initialRoom("p2", true, "PLAYING"), {
       type: "state",
-      data: { status: "IN_ROUND", roundIndex: 0, maxRounds: 12, scores: {}, round: { index: 0, speakerId: "p1", budget: 5, phase: "GUESSING", category: "Movies", guessCount: 0, guessedPlayerIds: [] } },
+      data: { status: "IN_ROUND", roundIndex: 0, maxRounds: 12, scores: {}, round: { index: 0, speakerId: "p1", budget: 5, phase: "GUESSING", category: "Movies", guessCount: 0, guessedPlayerIds: [], guesses: [] } },
     });
     expect(roleOf(host)).toBe("HOST");
   });
 
   it("clears the secret when a NEW round starts, keeps it within the round", () => {
     let s = seeded();
-    s = reduce(s, { type: "state", data: { status: "IN_ROUND", roundIndex: 0, maxRounds: 12, scores: {}, round: { index: 0, speakerId: "p1", budget: 5, phase: "AWAITING_CLUE", category: "Movies", guessCount: 0, guessedPlayerIds: [] } } });
+    s = reduce(s, { type: "state", data: { status: "IN_ROUND", roundIndex: 0, maxRounds: 12, scores: {}, round: { index: 0, speakerId: "p1", budget: 5, phase: "AWAITING_CLUE", category: "Movies", guessCount: 0, guessedPlayerIds: [], guesses: [] } } });
     s = reduce(s, { type: "secret", data: { roundIndex: 0, budget: 5, card: { secret: "Titanic", aliases: [], category: "Movies", forbidden: ["ship"] } } });
     expect(s.secret?.card.secret).toBe("Titanic");
 
     // Same round, phase change: secret survives.
-    s = reduce(s, { type: "state", data: { status: "IN_ROUND", roundIndex: 0, maxRounds: 12, scores: {}, round: { index: 0, speakerId: "p1", budget: 5, phase: "GUESSING", category: "Movies", clue: "big boat sad", guessCount: 0, guessedPlayerIds: [] } } });
+    s = reduce(s, { type: "state", data: { status: "IN_ROUND", roundIndex: 0, maxRounds: 12, scores: {}, round: { index: 0, speakerId: "p1", budget: 5, phase: "GUESSING", category: "Movies", clue: "big boat sad", guessCount: 0, guessedPlayerIds: [], guesses: [] } } });
     expect(s.secret).toBeDefined();
 
     // New round index: secret cleared.
-    s = reduce(s, { type: "state", data: { status: "IN_ROUND", roundIndex: 1, maxRounds: 12, scores: {}, round: { index: 1, speakerId: "p2", budget: 5, phase: "AWAITING_CLUE", category: "Family", guessCount: 0, guessedPlayerIds: [] } } });
+    s = reduce(s, { type: "state", data: { status: "IN_ROUND", roundIndex: 1, maxRounds: 12, scores: {}, round: { index: 1, speakerId: "p2", budget: 5, phase: "AWAITING_CLUE", category: "Family", guessCount: 0, guessedPlayerIds: [], guesses: [] } } });
     expect(s.secret).toBeUndefined();
   });
 
@@ -73,7 +73,7 @@ describe("client state reducer", () => {
 
   it("tracks whether this device already guessed", () => {
     let s = seeded();
-    s = reduce(s, { type: "state", data: { status: "IN_ROUND", roundIndex: 0, maxRounds: 12, scores: {}, round: { index: 0, speakerId: "p2", budget: 5, phase: "GUESSING", category: "Movies", guessCount: 1, guessedPlayerIds: ["p1"] } } });
+    s = reduce(s, { type: "state", data: { status: "IN_ROUND", roundIndex: 0, maxRounds: 12, scores: {}, round: { index: 0, speakerId: "p2", budget: 5, phase: "GUESSING", category: "Movies", guessCount: 1, guessedPlayerIds: ["p1"], guesses: [{ playerId: "p1", value: "nope", correct: false }] } } });
     expect(hasGuessed(s)).toBe(true);
   });
 
