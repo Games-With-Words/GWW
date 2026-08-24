@@ -92,3 +92,98 @@ describe("matchGuess — deterministic exact + alias", () => {
     expect(matchGuess(jurassic, "")).toBe(false);
   });
 });
+
+// ---- fuzzy correctness: forgiving typos WITHOUT making words interchangeable ----
+import { describe as fdesc, expect as fexp, it as fit } from "vitest";
+import { matchGuess as fmatch, editBudget, editDistance, singular } from "../src/rules.js";
+import type { Card as FCard } from "../src/types.js";
+
+const card = (secret: string, aliases: string[] = []): FCard => ({
+  id: "t", secret, aliases, category: "Family",
+  forbidden: ["a", "b", "c"], budget: 3, difficulty: 2,
+});
+
+fdesc("fuzzy guess matching", () => {
+  fit("still accepts everything the exact matcher accepted", () => {
+    fexp(fmatch(card("Jurassic Park"), "jurassic park")).toBe(true);
+    fexp(fmatch(card("Jurassic Park"), "  JURASSIC   PARK  ")).toBe(true);
+    fexp(fmatch(card("Don't Look Up"), "dont look up")).toBe(true);
+    fexp(fmatch(card("Café"), "cafe")).toBe(true);
+    fexp(fmatch(card("Titanic", ["the Titanic"]), "the titanic")).toBe(true);
+  });
+
+  fit("forgives the typo that used to lose a round", () => {
+    fexp(fmatch(card("Jurassic Park"), "jurassic parc")).toBe(true);
+    fexp(fmatch(card("Thanksgiving"), "thanksgivng")).toBe(true);
+    fexp(fmatch(card("Karaoke"), "karoake")).toBe(true);
+  });
+
+  fit("forgives singular and plural in both directions", () => {
+    fexp(fmatch(card("Wet socks"), "wet sock")).toBe(true);
+    fexp(fmatch(card("Leftover"), "leftovers")).toBe(true);
+    fexp(fmatch(card("Inside jokes"), "inside joke")).toBe(true);
+    fexp(fmatch(card("Box"), "boxes")).toBe(true);
+  });
+
+  fit("REFUSES to make short words interchangeable — the reason for length scaling", () => {
+    // A flat distance of 2 would accept every one of these. All must fail.
+    fexp(fmatch(card("Dip"), "tip")).toBe(false);
+    fexp(fmatch(card("Dip"), "top")).toBe(false);
+    fexp(fmatch(card("Cat"), "hat")).toBe(false);
+    fexp(fmatch(card("Cake"), "lake")).toBe(false);
+    fexp(fmatch(card("Wine"), "wife")).toBe(false);
+  });
+
+  fit("refuses a genuinely different answer of any length", () => {
+    fexp(fmatch(card("Jurassic Park"), "jurassic world")).toBe(false);
+    fexp(fmatch(card("Thanksgiving"), "christmas")).toBe(false);
+    fexp(fmatch(card("Road trip"), "road rage")).toBe(false);
+  });
+
+  fit("refuses a guess with the wrong number of words", () => {
+    fexp(fmatch(card("Air guitar"), "guitar")).toBe(false);
+    fexp(fmatch(card("Karaoke"), "karaoke night")).toBe(false);
+    fexp(fmatch(card("Air guitar"), "")).toBe(false);
+  });
+
+  fit("applies the same tolerance to aliases", () => {
+    fexp(fmatch(card("Group chat", ["the group chat"]), "the groop chat")).toBe(true);
+  });
+
+  fit("gives a token tolerance only when its neighbours corroborate it", () => {
+    // Uncorroborated (single-word answer): short words must be exact.
+    fexp(editBudget("dip", false)).toBe(0);
+    fexp(editBudget("cake", false)).toBe(0);
+    fexp(editBudget("karaoke", false)).toBe(1);
+    fexp(editBudget("thanksgiving", false)).toBe(2);
+    // Corroborated: the rest of the phrase matched exactly, so a slip is a typo.
+    fexp(editBudget("park", true)).toBe(1);
+    fexp(editBudget("cake", true)).toBe(1);
+  });
+
+  fit("refuses two wrong words — that is a different answer, not a typo", () => {
+    fexp(fmatch(card("Group chat"), "groop chit")).toBe(false);
+  });
+
+  fit("does not let a long phrase's budget rescue a genuinely wrong word", () => {
+    // "jurassic park" has a 2-edit budget, but a wrong second word blows past it.
+    fexp(fmatch(card("Jurassic Park"), "jurassic shark")).toBe(false);
+    fexp(fmatch(card("Group chat"), "group chair")).toBe(false);
+  });
+
+  fit("measures edit distance and bails out early past the cap", () => {
+    fexp(editDistance("parc", "park", 2)).toBe(1);
+    fexp(editDistance("same", "same", 2)).toBe(0);
+    fexp(editDistance("kitten", "sitting", 3)).toBe(3);
+    // Over the cap returns cap+1, not the true distance — early exit.
+    fexp(editDistance("abc", "xyzxyz", 1)).toBe(2);
+  });
+
+  fit("strips plurals without mangling words that just end in s", () => {
+    fexp(singular("socks")).toBe("sock");
+    fexp(singular("boxes")).toBe("box");
+    fexp(singular("parties")).toBe("party");
+    fexp(singular("glass")).toBe("glass");
+    fexp(singular("bus")).toBe("bus");
+  });
+});
