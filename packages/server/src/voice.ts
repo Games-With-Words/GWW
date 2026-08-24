@@ -250,10 +250,9 @@ export class VoiceService {
     const msg = chat.choices?.[0];
     // Some model servers put the answer in nonstandard fields — take any of them.
     const raw = msg?.message?.content ?? msg?.text ?? msg?.message?.reasoning_content ?? "";
-    if (raw.length === 0) {
-      // Show the SHAPE of what came back so the next log line names the culprit.
-      console.log(`[voice] empty muse response, body: ${JSON.stringify(chat).slice(0, 400)}`);
-    }
+    // Every muse response hits the log while we tune the pipeline — Mark's
+    // call: the raw body is the ground truth, show it.
+    console.log(`[voice] muse response (${cue}): ${JSON.stringify(chat).slice(0, 600)}`);
     const line = validateLine(raw);
     if (line === undefined) {
       // Show WHAT was rejected — a bare "line_rejected" cost us a debugging loop.
