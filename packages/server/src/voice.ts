@@ -160,6 +160,9 @@ export function validateLine(raw: string): string | undefined {
   if (words.length < 4 || words.length > 30) return undefined;
   if (/https?:|<|>|\{|\}/.test(line)) return undefined;
   if (!/[a-zA-Z]/.test(line)) return undefined;
+  // A finished line ends like a sentence. Seen live: a mid-clause fragment
+  // ("...so everyone else") got rendered and cached. Hosts don't trail off.
+  if (!/[.!?…]$/.test(line)) return undefined;
   return line;
 }
 
