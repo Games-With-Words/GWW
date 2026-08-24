@@ -54,6 +54,13 @@ export interface Socket {
   close(): void;
 }
 
+/** Pure URL builder — the board/player credential choice lives HERE and is tested. */
+export function wsUrl(host: string, secure: boolean, roomId: string, token: string, asBoard: boolean): string {
+  const proto = secure ? "wss" : "ws";
+  const cred = asBoard ? `board=${encodeURIComponent(token)}` : `token=${encodeURIComponent(token)}`;
+  return `${proto}://${host}/ws?room=${encodeURIComponent(roomId)}&${cred}`;
+}
+
 export function openSocket(
   roomId: string,
   token: string,
@@ -61,9 +68,7 @@ export function openSocket(
   onClose: () => void,
   asBoard = false,
 ): Socket {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  const cred = asBoard ? `board=${encodeURIComponent(token)}` : `token=${encodeURIComponent(token)}`;
-  const ws = new WebSocket(`${proto}://${location.host}/ws?room=${encodeURIComponent(roomId)}&${cred}`);
+  const ws = new WebSocket(wsUrl(location.host, location.protocol === "https:", roomId, token, asBoard));
   ws.onmessage = (e) => {
     try {
       onMessage(JSON.parse(String(e.data)));

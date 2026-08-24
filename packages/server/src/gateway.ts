@@ -313,7 +313,7 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
 
     const player = rooms.authenticate(room, token);
     if (player === undefined) {
-      glog("ws", `${room.shortCode} player connect REFUSED: bad/stale token — likely an OLD CLIENT BUILD, hard-refresh the device`);
+      glog("ws", `${room.shortCode} player connect REFUSED: token does not match any player — stale client build, expired room, or a board token sent on the player path`);
       send(ws, "error", { error: "BAD_TOKEN", message: "Invalid player token." });
       ws.close(4401, "bad token");
       return;
