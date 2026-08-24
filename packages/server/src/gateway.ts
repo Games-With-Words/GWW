@@ -23,7 +23,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { MemoryEventLog, type EventLog } from "./log.js";
 import { RoomError, RoomStore, type Room } from "./rooms.js";
 import { GameSession, SessionError } from "./session.js";
-import { VoiceService, voiceConfigFromEnv } from "./voice.js";
+import { CUES, VoiceService, voiceConfigFromEnv, type Cue } from "./voice.js";
 import { glog, statusColor } from "./logger.js";
 
 interface JoinAttemptWindow {
@@ -172,6 +172,19 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
 
     // Ris's intro: cached voiced line when one exists, L0 caption otherwise.
     // Read-only and instant — generation happens in the background drip.
+    // Ris's full script: one line per hosting moment, voiced when cached.
+    const cueMatch = /^\/api\/voice\/cue\/([a-z_]+)$/.exec(path);
+    if (req.method === "GET" && cueMatch !== null) {
+      const cue = cueMatch[1] as Cue;
+      if (!CUES.includes(cue)) { json(res, 404, { error: "UNKNOWN_CUE" }); return; }
+      const line = voice.pickLine(cue);
+      json(res, 200, {
+        text: line.text,
+        audioUrl: line.audioFile !== undefined ? `/api/voice/audio/${line.audioFile}` : null,
+      });
+      return;
+    }
+
     if (req.method === "GET" && path === "/api/voice/intro") {
       const intro = voice.pickIntro();
       json(res, 200, {
