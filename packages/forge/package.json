@@ -1,12 +1,11 @@
 {
   "name": "@gww/forge",
   "version": "0.1.0",
-  "description": "Offline content pipeline for Games With Words — generates, gates and versions content packs. NEVER runs on the gameplay path.",
+  "description": "Offline content pipeline for Games With Words \u2014 generates, gates and versions content packs. NEVER runs on the gameplay path.",
   "license": "GPL-3.0-only",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "bin": { "gww-forge": "dist/cli.js" },
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc --noEmit",
