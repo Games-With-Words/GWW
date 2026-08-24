@@ -35,17 +35,36 @@ live until it is on disk in git.
 
 ## How the model hands content back
 
-Every spec teaches the model [sentinel blocks](https://www.npmjs.com/package/sentinel-blocks):
+Every spec teaches the model [sentinel blocks](https://www.npmjs.com/package/sentinel-blocks).
+**Each value gets its own named block. There is no JSON.**
 
 ```
-<<<CARD>>>
-{ "secret": "Air guitar", ... }
+<<<FIELD secret>>>
+Mom's "famous" dip
+<<<END>>>
+<<<FIELD forbidden>>>
+mayonnaise
+recipe
+potluck
 <<<END>>>
 ```
 
-The model thinks for as long as it likes, then closes a block to say DONE. We
-read the block and nothing else — no tail-grabbing, no guessing which sentence
-was the answer. That guessing is what once put a model's own reasoning
+That is not a stylistic preference, it is the whole point. A JSON payload has
+quotes to escape, braces to balance and commas to forget, and a local model
+gets one of them wrong eventually — the first live run died on
+`Expected property name or '}' at position 2`. Field blocks have no parse step
+at all: the bytes between the markers are the value. Apostrophes, quotes and
+braces in a reveal line are now harmless.
+
+A field with several values gets one block with **one value per line** —
+bullets and stray quotes are stripped. Missing a required field reports
+`missing field block(s): budget`, which is a diagnosis instead of a stack
+trace.
+
+The model thinks for as long as it likes, then writes its blocks to say DONE. We
+read the blocks and nothing else — no tail-grabbing, no guessing which sentence
+was the answer. If it changes its mind and rewrites the set, the last block for
+each field wins. That guessing is what once put a model's own reasoning
 ("I'll produce one line.") into a rendered WAV. There is no token cap, because
 capping a thinking model starves its reasoning pass and the answer comes back
 empty.
@@ -60,14 +79,19 @@ gate, and a dedupe key.
 
 ```ts
 export const myThing: ContentSpec<Thing> = {
-  id: "my-thing", version: "1", tag: "THING", payload: "json",
+  id: "my-thing", version: "1", tag: "FIELD", payload: "fields",
+  fields: ["name", "notes"], required: ["name"],
   brief: "You write ...",
-  shape: `{ "field": "example" }`,
+  shape: "<<<FIELD name>>>\nexample\n<<<END>>>",
   user: ({ seed, avoid }) => `Write one. Seed: ${seed}.`,
+  // raw is Record<field, string> — the plain text between the markers.
   gate: (raw) => /* validate, return {ok:true,item} or {ok:false,reason} */,
-  key: (item) => normalize(item.field),
+  key: (item) => normalize(item.name),
 };
 ```
+
+Use `payload: "text"` with a single tag when the whole item is one piece of
+prose (Ris's hosting lines work this way).
 
 The gate is where the real work is. Write it as if a bad item will reach a
 player, because it will. The Say Less card gate rejects a forbidden-word list

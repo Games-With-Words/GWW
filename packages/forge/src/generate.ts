@@ -8,7 +8,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { extractBlocks, jsonFromResponse, repairJson } from "sentinel-blocks";
+import { extractBlocks, extractTaggedBlocks } from "sentinel-blocks";
 import { systemPrompt, type ContentSpec, type GateResult } from "./spec.js";
 
 export interface ForgeConfig {
@@ -38,7 +38,7 @@ export type Failure =
   | { kind: "truncated" }
   | { kind: "no_block" }
   | { kind: "unterminated" }
-  | { kind: "unparseable"; detail: string }
+  | { kind: "incomplete"; missing: string[] }
   | { kind: "gated"; reason: string }
   | { kind: "duplicate"; key: string }
   | { kind: "threw"; detail: string };
@@ -48,88 +48,74 @@ export type Attempt<T> = { ok: true; item: T } | { ok: false; failure: Failure; 
 /**
  * Pull the payload out of a completion.
  *
- * The request is NOT streamed — we already hold the model's whole completion
- * before this runs. What matters here is WHICH block to read.
+ * The request is NOT streamed — we already hold the whole completion before
+ * this runs. What matters is WHICH blocks to read.
  *
- * Learned live: muse emitted a skeleton block containing just "{" and then the
- * real card in a second block. Reading the FIRST block got the skeleton and a
- * useless "Expected property name at position 2". The prompt asks for the
- * block LAST, so we read the last complete block that passes the gate, and
- * work backwards from there. Still zero guessing — every candidate is
- * sentinel-delimited, we just honour the instruction we gave.
+ * For field specs there is no parse step at all: each value arrives in its own
+ * named block, so there are no quotes to escape, no braces to balance, and
+ * nothing that can throw. The last block for a given field wins, because the
+ * prompt tells the model that rewriting the set replaces it.
+ *
+ * (This replaced a JSON payload. muse emitted a skeleton "{" block and a real
+ * one, we read the first, and got "Expected property name at position 2".
+ * Mark's call: it only ever needed to be parseable inside the blocks.)
  */
 export function payloadFromCompletion<T>(
   spec: ContentSpec<T>,
   content: string,
   thinking: string,
-): GateResult<T> | { ok: false; reason: string } {
-  const open = `<<<${spec.tag}>>>`;
+): GateResult<T> {
+  const open = `<<<${spec.tag}`;
   let sawOpen = false;
   let lastReason = "no_block";
 
   for (const channel of [content, thinking]) {
     if (channel.length === 0) continue;
     if (channel.includes(open)) sawOpen = true;
-    const blocks = extractBlocks(channel, spec.tag);
-    // Last first: the finished answer is the one it closed last.
-    for (let i = blocks.length - 1; i >= 0; i--) {
-      const block = blocks[i]!;
-      if (spec.payload === "text") {
-        const r = spec.gate(block);
+
+    if (spec.payload === "text") {
+      const blocks = extractBlocks(channel, spec.tag);
+      for (let i = blocks.length - 1; i >= 0; i--) {
+        const r = spec.gate(blocks[i]!);
         if (r.ok) return r;
         lastReason = r.reason;
-        continue;
       }
-      const parsed = parseLoosely(block);
-      if (parsed === undefined) {
-        lastReason = `unparseable json in block: ${JSON.stringify(block.slice(0, 120))}`;
-        continue;
-      }
-      const r = spec.gate(parsed);
-      if (r.ok) return r;
-      lastReason = r.reason;
+      continue;
     }
+
+    // Field blocks: collect them, last write per field wins.
+    const tagged = extractTaggedBlocks(channel, spec.tag);
+    if (tagged.length === 0) continue;
+    const values: Record<string, string> = {};
+    for (const { arg, content: v } of tagged) {
+      if (arg.length === 0) continue;
+      values[arg] = v.trim();
+    }
+    const missing = (spec.required ?? []).filter((f) => (values[f] ?? "").length === 0);
+    if (missing.length > 0) {
+      lastReason = "incomplete";
+      // Keep looking — the other channel may hold the complete set.
+      const other = channel === content ? thinking : "";
+      if (other.length === 0) return { ok: false, reason: "incomplete", missing };
+      continue;
+    }
+    const r = spec.gate(values);
+    if (r.ok) return r;
+    lastReason = r.reason;
   }
-  // An opened-but-never-closed block is its own diagnosis: the model was still
-  // writing, or stopped early. Distinguishing it from "never tried" matters.
+
   if (sawOpen && lastReason === "no_block") return { ok: false, reason: "unterminated" };
   return { ok: false, reason: lastReason };
 }
 
-/**
- * JSON as local models actually write it. Strict parse first, then the
- * library's fence/trailing-comma repair, then the two sins it doesn't cover:
- * comments and unquoted keys. Every step is deterministic — nothing is
- * invented, and a payload that survives none of them is rejected.
- */
-export function parseLoosely(block: string): unknown | undefined {
-  const attempts = [
-    block,
-    repairJson(block),
-    stripComments(repairJson(block)),
-    quoteBareKeys(stripComments(repairJson(block))),
-  ];
-  for (const a of attempts) {
-    try {
-      return JSON.parse(a) as unknown;
-    } catch {
-      // try the next repair
-    }
-  }
-  // Last resort: the library's full pipeline, which can slice a balanced
-  // object out of surrounding prose.
-  try {
-    return jsonFromResponse(block);
-  } catch {
-    return undefined;
-  }
+/** Split a multi-value field: one value per line, blank lines dropped. */
+export function lines(v: string | undefined): string[] {
+  if (v === undefined) return [];
+  return v
+    .split("\n")
+    .map((l) => l.trim().replace(/^[-*\u2022]\s*/, "").replace(/^["'\u201c\u2018]+|["'\u201d\u2019]+$/g, "").trim())
+    .filter((l) => l.length > 0);
 }
-
-const stripComments = (s: string): string =>
-  s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'\w])\/\/[^\n]*/g, "$1");
-
-const quoteBareKeys = (s: string): string =>
-  s.replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3');
 
 /** One generation attempt. No token cap — the model thinks as long as it needs. */
 export async function generateOne<T>(
@@ -180,8 +166,8 @@ export async function generateOne<T>(
   const raw = content.length > 0 ? content : thinking;
   if (verdict.reason === "no_block") return { ok: false, failure: { kind: "no_block" }, raw };
   if (verdict.reason === "unterminated") return { ok: false, failure: { kind: "unterminated" }, raw };
-  if (verdict.reason.startsWith("unparseable json")) {
-    return { ok: false, failure: { kind: "unparseable", detail: verdict.reason }, raw };
+  if (verdict.reason === "incomplete") {
+    return { ok: false, failure: { kind: "incomplete", missing: verdict.missing ?? [] }, raw };
   }
   return { ok: false, failure: { kind: "gated", reason: verdict.reason }, raw };
 }
@@ -225,7 +211,7 @@ export async function generateBatch<T>(
       // For these three the raw text IS the diagnosis — print it NOW, not in a
       // summary the operator may never reach. Ctrl-C cost us a round trip.
       const shape = r.failure.kind;
-      if (r.raw !== undefined && (shape === "no_block" || shape === "unterminated" || shape === "unparseable")) {
+      if (r.raw !== undefined && (shape === "no_block" || shape === "unterminated" || shape === "incomplete")) {
         log(`       raw tail: ${JSON.stringify(r.raw.slice(-400))}`);
       }
       continue;
@@ -249,7 +235,7 @@ export function describe(f: Failure): string {
     case "truncated": return "truncated (finish_reason=length) — check the upstream token limit";
     case "no_block": return "no sentinel block closed";
     case "unterminated": return `opened <<<TAG>>> but never closed it — the model stopped mid-block`;
-    case "unparseable": return f.detail;
+    case "incomplete": return `missing field block(s): ${f.missing.join(", ")}`;
     case "gated": return `gate: ${f.reason}`;
     case "duplicate": return `duplicate ${f.key}`;
     case "threw": return f.detail;

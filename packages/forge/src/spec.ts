@@ -19,7 +19,11 @@ export interface Provenance {
   promptHash: string;
 }
 
-export type GateResult<T> = { ok: true; item: T } | { ok: false; reason: string };
+export type GateResult<T> =
+  | { ok: true; item: T }
+  /** `missing` names absent required field blocks — a far better diagnosis
+   *  than a generic parse error, and the reason field specs beat JSON. */
+  | { ok: false; reason: string; missing?: string[] | undefined };
 
 export interface ContentSpec<T> {
   /** Stable identifier; also the pack directory name. */
@@ -28,15 +32,27 @@ export interface ContentSpec<T> {
   version: string;
   /** The sentinel tag the model wraps its payload in. */
   tag: string;
-  /** Does the payload arrive as JSON, or as plain speakable text? */
-  payload: "json" | "text";
+  /**
+   * How the payload arrives.
+   * - "fields": one named block per field. Nothing to malform — no quotes, no
+   *   braces, no commas, so there is no parse step that can fail.
+   * - "text": a single block holding one piece of prose.
+   */
+  payload: "fields" | "text";
   /** Teaches the job. The sentinel lesson is appended automatically. */
   brief: string;
-  /** The shape the model should emit inside the block (shown in the prompt). */
+  /** For "fields": the field names, in the order the model should write them. */
+  fields?: readonly string[];
+  /** For "fields": which of them must be present. Missing ones are named back. */
+  required?: readonly string[];
+  /** A worked example of the whole payload, shown in the prompt. */
   shape: string;
   /** One request's user message. `avoid` lists keys already in the packs. */
   user(ctx: { seed: number; avoid: string[] }): string;
-  /** Judge a parsed payload. Rejections carry a reason and cost nothing. */
+  /**
+   * Judge the payload. For "fields" this receives Record<field, string> with
+   * the raw block contents; for "text", the block string.
+   */
   gate(raw: unknown): GateResult<T>;
   /** Dedupe identity — normalized, compared across every existing pack. */
   key(item: T): string;
@@ -49,39 +65,72 @@ export interface ContentSpec<T> {
  * long as it likes, then closes a block to say DONE. We read the block and
  * nothing else. No tail-grabbing, no guessing which sentence was the answer.
  */
-export function sentinelLesson(tag: string, shape: string, payload: "json" | "text"): string {
-  const body = payload === "json"
-    ? "Between the markers: ONE complete JSON object and nothing else. Strict " +
-      "JSON — every key double-quoted, no comments, no trailing commas, no " +
-      "markdown fences, no prose."
-    : "Between the markers: only the finished text. No quotes, no label, no " +
-      "alternatives, no notes.";
-  return [
+export function sentinelLesson(spec: {
+  tag: string;
+  shape: string;
+  payload: "fields" | "text";
+  fields?: readonly string[] | undefined;
+}): string {
+  const head = [
     "",
     "=== HOW TO ANSWER: SENTINEL BLOCKS ===",
     "Your reply is read by a machine that does NOT guess. It ignores everything",
-    "you write except one clearly marked block, so think as long as you like,",
-    "weigh options, change your mind — none of it leaks into the result.",
+    "you write except clearly marked blocks, so think as long as you like, weigh",
+    "options, change your mind — none of it leaks into the result.",
     "",
-    "A sentinel block is an opening marker on its own line, the payload, then a",
-    "closing marker on its own line:",
+  ];
+
+  if (spec.payload === "text") {
+    return [
+      ...head,
+      "A sentinel block is an opening marker on its own line, the payload, then a",
+      "closing marker on its own line:",
+      "",
+      `<<<${spec.tag}>>>`,
+      spec.shape,
+      "<<<END>>>",
+      "",
+      "Rules:",
+      `1. Emit exactly ONE <<<${spec.tag}>>> block, and emit it LAST — it is how you say DONE.`,
+      "2. Between the markers: only the finished text. No quotes, no label, no",
+      "   alternatives, no notes.",
+      "3. Both markers sit alone on their own lines, spelled exactly as shown.",
+      "4. Anything outside the block is discarded — deliberate freely above it.",
+      "5. Write the block only when it is COMPLETE.",
+    ].join("\n");
+  }
+
+  return [
+    ...head,
+    "Give each value its OWN named block. A block is an opening marker with the",
+    "field name, the value, then a closing marker — each marker alone on its line:",
     "",
-    `<<<${tag}>>>`,
-    shape,
+    `<<<${spec.tag} fieldname>>>`,
+    "the value, exactly as it should be stored",
     "<<<END>>>",
     "",
+    "There is no JSON here on purpose. No quotes to escape, no braces to balance,",
+    "no commas to forget. Write the value plainly and it arrives intact.",
+    "",
+    "Emit these blocks, in this order:",
+    ...(spec.fields ?? []).map((f) => `  <<<${spec.tag} ${f}>>>`),
+    "",
     "Rules:",
-    `1. Emit exactly ONE <<<${tag}>>> block, and emit it LAST — it is how you say DONE.`,
-    `2. ${body}`,
-    "3. Both markers sit alone on their own lines, spelled exactly as shown.",
-    "4. Anything outside the block is discarded — deliberate freely above it.",
-    "5. Write the block only when it is COMPLETE. Do not open the markers and",
-    "   then think — an unclosed or half-written block is thrown away. Finish",
-    "   deciding first, then write the whole thing at once.",
+    "1. One block per field. A field with several values gets ONE block with one",
+    "   value PER LINE — do not comma-separate them.",
+    "2. Between the markers: the bare value. No quotes, no field name repeated,",
+    "   no explanation, no markdown.",
+    "3. Both markers alone on their own lines, spelled exactly as shown.",
+    "4. Anything outside the blocks is discarded — deliberate freely above them.",
+    "5. Write all the blocks together at the END, once you have decided. If you",
+    "   change your mind, write the whole set again; the last set wins.",
+    "",
+    "Worked example:",
+    spec.shape,
   ].join("\n");
 }
 
 /** The full system prompt for a spec: its brief, then the sentinel lesson. */
 export function systemPrompt(spec: ContentSpec<unknown>): string {
-  return `${spec.brief}\n${sentinelLesson(spec.tag, spec.shape, spec.payload)}`;
+  return `${spec.brief}\n${sentinelLesson(spec)}`;
 }

@@ -8,6 +8,7 @@
  */
 
 import { normalize, tokenize, type Card } from "@gww/say-less";
+import { lines } from "../generate.js";
 import type { ContentSpec, GateResult } from "../spec.js";
 
 /** Categories are fixed by the game manifest — the model does not invent them. */
@@ -21,15 +22,37 @@ export const CARD_CATEGORIES = [
   "Everyday Life",
 ] as const;
 
-const SHAPE = `{
-  "secret": "Air guitar",
-  "aliases": ["air guitar solo"],
-  "category": "Music",
-  "forbidden": ["instrument", "pretend", "rock", "invisible"],
-  "budget": 3,
-  "difficulty": 3,
-  "revealLine": "Zero strings attached."
-}`;
+export const CARD_FIELDS = [
+  "secret", "aliases", "category", "forbidden", "budget", "difficulty", "revealLine",
+] as const;
+
+/** Required — a card without these is not a card. aliases and revealLine are optional. */
+const CARD_REQUIRED = ["secret", "category", "forbidden", "budget", "difficulty"] as const;
+
+const SHAPE = `<<<FIELD secret>>>
+Air guitar
+<<<END>>>
+<<<FIELD aliases>>>
+air guitar solo
+<<<END>>>
+<<<FIELD category>>>
+Music
+<<<END>>>
+<<<FIELD forbidden>>>
+instrument
+pretend
+rock
+invisible
+<<<END>>>
+<<<FIELD budget>>>
+3
+<<<END>>>
+<<<FIELD difficulty>>>
+3
+<<<END>>>
+<<<FIELD revealLine>>>
+Zero strings attached.
+<<<END>>>`;
 
 const BRIEF = [
   "You write cards for Say Less, a party game played out loud by friends and",
@@ -43,9 +66,11 @@ const BRIEF = [
   "",
   "Field rules:",
   "- secret: 1 to 3 words. A thing, title, or moment. Never a full sentence.",
-  "- aliases: 0 to 3 accepted alternates (plurals, 'the' forms, common nicknames).",
+  "- aliases: 0 to 3 accepted alternates (plurals, 'the' forms, common nicknames),",
+  "  one per line. Leave the block empty if there are none.",
   "- category: EXACTLY one of " + CARD_CATEGORIES.join(", ") + ".",
-  "- forbidden: 3 to 5 single words a Speaker would obviously reach for first.",
+  "- forbidden: 3 to 5 single words a Speaker would obviously reach for first,",
+  "  ONE PER LINE.",
   "  They must NOT contain any word from the secret or its aliases — the card",
   "  has to stay playable. Block the obvious neighbours, not the answer itself.",
   "- budget: clue word allowance, 1 to 7. Easy and concrete gets 5. Abstract",
@@ -71,8 +96,10 @@ const isStringArray = (v: unknown): v is string[] =>
 export const sayLessCards: ContentSpec<Card> = {
   id: "say-less-cards",
   version: "1",
-  tag: "CARD",
-  payload: "json",
+  tag: "FIELD",
+  payload: "fields",
+  fields: CARD_FIELDS,
+  required: CARD_REQUIRED,
   brief: BRIEF,
   shape: SHAPE,
 
@@ -91,56 +118,56 @@ export const sayLessCards: ContentSpec<Card> = {
   },
 
   gate(raw: unknown): GateResult<Card> {
-    if (typeof raw !== "object" || raw === null) return { ok: false, reason: "not an object" };
-    const c = raw as RawCard;
+    if (typeof raw !== "object" || raw === null) return { ok: false, reason: "no field blocks" };
+    const f = raw as Record<string, string | undefined>;
 
-    if (typeof c.secret !== "string") return { ok: false, reason: "secret missing" };
-    const secret = c.secret.trim();
+    // Every value arrives as the plain text the model wrote between markers.
+    // Nothing was parsed, so nothing could have been mangled on the way in.
+    const secret = (f["secret"] ?? "").trim();
     const secretWords = tokenize(secret);
     if (secretWords.length < 1 || secretWords.length > 3) {
       return { ok: false, reason: `secret must be 1-3 words, got ${secretWords.length}: "${secret}"` };
     }
 
-    const aliases = c.aliases === undefined ? [] : c.aliases;
-    if (!isStringArray(aliases)) return { ok: false, reason: "aliases must be strings" };
-    if (aliases.length > 3) return { ok: false, reason: `too many aliases (${aliases.length})` };
+    const aliases = lines(f["aliases"]).slice(0, 3);
 
-    if (typeof c.category !== "string" || !CARD_CATEGORIES.includes(c.category as typeof CARD_CATEGORIES[number])) {
-      return { ok: false, reason: `category not in the manifest list: ${String(c.category)}` };
+    const category = (f["category"] ?? "").trim();
+    if (!CARD_CATEGORIES.includes(category as typeof CARD_CATEGORIES[number])) {
+      return { ok: false, reason: `category not in the manifest list: "${category}"` };
     }
 
-    if (!isStringArray(c.forbidden)) return { ok: false, reason: "forbidden must be strings" };
-    const forbidden = c.forbidden.map((f) => f.trim()).filter((f) => f.length > 0);
+    const forbidden = lines(f["forbidden"]).map((x) => x.toLowerCase());
     if (forbidden.length < 3 || forbidden.length > 5) {
-      return { ok: false, reason: `forbidden must have 3-5 words, got ${forbidden.length}` };
+      return { ok: false, reason: `forbidden needs 3-5 words, one per line, got ${forbidden.length}` };
     }
-    if (forbidden.some((f) => tokenize(f).length !== 1)) {
+    if (forbidden.some((x) => tokenize(x).length !== 1)) {
       return { ok: false, reason: `forbidden entries must be single words: ${forbidden.join(", ")}` };
     }
     // THE important check: a forbidden list containing the answer's own words
     // leaves the Speaker with no legal clue at all.
-    const answerTokens = new Set([secret, ...aliases].flatMap((s) => tokenize(s)));
-    const collision = forbidden.find((f) => answerTokens.has(tokenize(f)[0] ?? ""));
+    const answerTokens = new Set([secret, ...aliases].flatMap((x) => tokenize(x)));
+    const collision = forbidden.find((x) => answerTokens.has(tokenize(x)[0] ?? ""));
     if (collision !== undefined) {
       return { ok: false, reason: `forbidden word "${collision}" is part of the answer — card unplayable` };
     }
-    if (new Set(forbidden.map((f) => normalize(f))).size !== forbidden.length) {
+    if (new Set(forbidden.map((x) => normalize(x))).size !== forbidden.length) {
       return { ok: false, reason: "duplicate forbidden words" };
     }
 
-    if (typeof c.budget !== "number" || !Number.isInteger(c.budget) || c.budget < 1 || c.budget > 7) {
-      return { ok: false, reason: `budget must be an integer 1-7, got ${String(c.budget)}` };
+    const budget = Number((f["budget"] ?? "").trim());
+    if (!Number.isInteger(budget) || budget < 1 || budget > 7) {
+      return { ok: false, reason: `budget must be an integer 1-7, got "${f["budget"] ?? ""}"` };
     }
-    if (c.difficulty !== 1 && c.difficulty !== 2 && c.difficulty !== 3 && c.difficulty !== 4) {
-      return { ok: false, reason: `difficulty must be 1-4, got ${String(c.difficulty)}` };
+    const difficulty = Number((f["difficulty"] ?? "").trim());
+    if (difficulty !== 1 && difficulty !== 2 && difficulty !== 3 && difficulty !== 4) {
+      return { ok: false, reason: `difficulty must be 1-4, got "${f["difficulty"] ?? ""}"` };
     }
 
     let revealLine: string | undefined;
-    if (c.revealLine !== undefined) {
-      if (typeof c.revealLine !== "string") return { ok: false, reason: "revealLine must be a string" };
-      const rl = c.revealLine.trim().replace(/^["'“‘]+|["'”’]+$/g, "");
+    const rl = lines(f["revealLine"])[0];
+    if (rl !== undefined) {
       if (tokenize(rl).length > 14) return { ok: false, reason: `revealLine too long: "${rl}"` };
-      if (rl.length > 0) revealLine = rl;
+      revealLine = rl;
     }
 
     // Content-addressed id: the same secret always yields the same card id,
@@ -151,11 +178,11 @@ export const sayLessCards: ContentSpec<Card> = {
       item: {
         id: `sl-gen-${slug}`,
         secret,
-        aliases: aliases.map((a) => a.trim()).filter((a) => a.length > 0),
-        category: c.category,
-        forbidden: forbidden.map((f) => f.toLowerCase()),
-        budget: c.budget,
-        difficulty: c.difficulty,
+        aliases,
+        category,
+        forbidden,
+        budget,
+        difficulty: difficulty as 1 | 2 | 3 | 4,
         ...(revealLine !== undefined ? { revealLine } : {}),
       },
     };

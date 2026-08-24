@@ -17,15 +17,21 @@ import {
   type ForgeConfig,
 } from "../src/index.js";
 
-const goodCard = {
+/** A card as FIELD BLOCK VALUES — plain text, exactly as the model writes it. */
+const goodCard: Record<string, string> = {
   secret: "Air guitar",
-  aliases: ["air guitar solo"],
+  aliases: "air guitar solo",
   category: "Music",
-  forbidden: ["instrument", "pretend", "rock", "invisible"],
-  budget: 3,
-  difficulty: 3,
+  forbidden: "instrument\npretend\nrock\ninvisible",
+  budget: "3",
+  difficulty: "3",
   revealLine: "Zero strings attached.",
 };
+
+/** Render field values the way the sentinel lesson teaches. */
+function asBlocks(f: Record<string, string>): string {
+  return Object.entries(f).map(([k, v]) => `<<<FIELD ${k}>>>\n${v}\n<<<END>>>`).join("\n");
+}
 
 const cfg = (over: Partial<ForgeConfig> = {}): ForgeConfig => ({
   aiasUrl: "https://aiassist.test",
@@ -40,9 +46,10 @@ function fakeModel(payloads: unknown[], opts: { thinking?: boolean; finish?: str
   let i = 0;
   return (async () => {
     const p = payloads[Math.min(i++, payloads.length - 1)];
-    const body = typeof p === "string" ? p : JSON.stringify(p, null, 2);
-    const tag = typeof p === "string" ? "LINE" : "CARD";
-    const text = `Weighing a few angles first.\n<<<${tag}>>>\n${body}\n<<<END>>>`;
+    const body = typeof p === "string"
+      ? `<<<LINE>>>\n${p}\n<<<END>>>`
+      : asBlocks(p as Record<string, string>);
+    const text = `Weighing a few angles first.\n${body}`;
     const message = opts.thinking ? { content: "", thinking: text } : { content: text };
     return new Response(
       JSON.stringify({ choices: [{ ...(opts.finish !== undefined ? { finish_reason: opts.finish } : {}), message }] }),
@@ -65,18 +72,14 @@ describe("say-less card gate — a bad card breaks a round, not just a line", ()
   });
 
   it("REJECTS a forbidden word that is part of the answer — the card would be unplayable", () => {
-    const r = sayLessCards.gate({ ...goodCard, forbidden: ["guitar", "pretend", "rock"] });
+    const r = sayLessCards.gate({ ...goodCard, forbidden: "guitar\npretend\nrock" });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toContain("unplayable");
   });
 
   it("rejects a forbidden word hiding inside an alias", () => {
-    const r = sayLessCards.gate({
-      ...goodCard,
-      aliases: ["karaoke night"],
-      forbidden: ["karaoke", "pretend", "rock"],
-    });
+    const r = sayLessCards.gate({ ...goodCard, aliases: "karaoke night", forbidden: "karaoke\npretend\nrock" });
     expect(r.ok).toBe(false);
   });
 
@@ -91,15 +94,15 @@ describe("say-less card gate — a bad card breaks a round, not just a line", ()
   });
 
   it("rejects multi-word forbidden entries and the wrong count", () => {
-    expect(sayLessCards.gate({ ...goodCard, forbidden: ["air travel", "pretend", "rock"] }).ok).toBe(false);
-    expect(sayLessCards.gate({ ...goodCard, forbidden: ["one", "two"] }).ok).toBe(false);
-    expect(sayLessCards.gate({ ...goodCard, forbidden: ["a", "b", "c", "d", "e", "f"] }).ok).toBe(false);
+    expect(sayLessCards.gate({ ...goodCard, forbidden: "air travel\npretend\nrock" }).ok).toBe(false);
+    expect(sayLessCards.gate({ ...goodCard, forbidden: "one\ntwo" }).ok).toBe(false);
+    expect(sayLessCards.gate({ ...goodCard, forbidden: "a\nb\nc\nd\ne\nf" }).ok).toBe(false);
   });
 
   it("rejects out-of-range budget and difficulty", () => {
-    expect(sayLessCards.gate({ ...goodCard, budget: 0 }).ok).toBe(false);
-    expect(sayLessCards.gate({ ...goodCard, budget: 9 }).ok).toBe(false);
-    expect(sayLessCards.gate({ ...goodCard, difficulty: 5 }).ok).toBe(false);
+    expect(sayLessCards.gate({ ...goodCard, budget: "0" }).ok).toBe(false);
+    expect(sayLessCards.gate({ ...goodCard, budget: "9" }).ok).toBe(false);
+    expect(sayLessCards.gate({ ...goodCard, difficulty: "5" }).ok).toBe(false);
   });
 
   it("rejects a rambling reveal line but accepts a card without one", () => {
@@ -135,63 +138,78 @@ describe("ris line gate", () => {
   });
 });
 
-describe("sentinel extraction", () => {
-  it("reads the block out of the answer channel and ignores the deliberation", () => {
-    const text = `Let me think about this.\n<<<CARD>>>\n${JSON.stringify(goodCard)}\n<<<END>>>\nThat works.`;
-    const r = payloadFromCompletion(sayLessCards, text, "");
-    expect(r.ok).toBe(true);
-  });
-
-  it("reads the block out of the thinking channel when content is empty", () => {
-    const text = `<<<CARD>>>\n${JSON.stringify(goodCard)}\n<<<END>>>`;
-    expect(payloadFromCompletion(sayLessCards, "", text).ok).toBe(true);
-  });
-
-  it("returns no_block when the model never closed one", () => {
-    const r = payloadFromCompletion(sayLessCards, JSON.stringify(goodCard), "");
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe("no_block");
-  });
-
-  it("reads the LAST complete block — muse emitted a skeleton before the real card", () => {
-    // The exact live failure: block one held "{", so reading the FIRST block
-    // gave "Expected property name or '}' at position 2".
-    const text = `<<<CARD>>>\n{\n<<<END>>>\nlet me try that again properly.\n<<<CARD>>>\n${JSON.stringify(goodCard)}\n<<<END>>>`;
+describe("sentinel extraction — field blocks, nothing to parse", () => {
+  it("reads the field blocks and ignores every word of deliberation", () => {
+    const text = `Let me weigh a couple of angles first.\n${asBlocks(goodCard)}\nThat should land.`;
     const r = payloadFromCompletion(sayLessCards, text, "");
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.item.secret).toBe("Air guitar");
   });
 
-  it("names an unterminated block instead of blaming the JSON", () => {
-    const r = payloadFromCompletion(sayLessCards, `<<<CARD>>>\n{ "secret": "Air guitar"`, "");
+  it("reads them out of the thinking channel when content is empty", () => {
+    expect(payloadFromCompletion(sayLessCards, "", asBlocks(goodCard)).ok).toBe(true);
+  });
+
+  it("returns no_block when the model wrote values with no markers at all", () => {
+    const r = payloadFromCompletion(sayLessCards, "secret: Air guitar, category: Music", "");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("no_block");
+  });
+
+  it("NAMES the missing field instead of failing with a parse error", () => {
+    const { budget: _drop, ...partial } = goodCard;
+    const r = payloadFromCompletion(sayLessCards, asBlocks(partial), "");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("incomplete");
+      expect(r.missing).toEqual(["budget"]);
+    }
+  });
+
+  it("lets a rewritten set replace an earlier one — the last block wins", () => {
+    // The model changed its mind. Under a JSON payload this was the live
+    // failure: a skeleton block first, the real answer second, first one read.
+    const text = `${asBlocks({ ...goodCard, secret: "First attempt" })}\nactually, better:\n${asBlocks(goodCard)}`;
+    const r = payloadFromCompletion(sayLessCards, text, "");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.item.secret).toBe("Air guitar");
+  });
+
+  it("names an unterminated block rather than blaming the content", () => {
+    const r = payloadFromCompletion(sayLessCards, "<<<FIELD secret>>>\nAir guitar", "");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe("unterminated");
   });
 
-  it("falls through to the thinking channel when the content block is junk", () => {
-    const good = `<<<CARD>>>\n${JSON.stringify(goodCard)}\n<<<END>>>`;
-    const r = payloadFromCompletion(sayLessCards, "<<<CARD>>>\n{\n<<<END>>>", good);
+  it("falls through to thinking when the content blocks are incomplete", () => {
+    const { budget: _d, ...partial } = goodCard;
+    const r = payloadFromCompletion(sayLessCards, asBlocks(partial), asBlocks(goodCard));
     expect(r.ok).toBe(true);
   });
 
-  it("forgives the JSON sins local models actually commit", () => {
-    const sins = [
-      // unquoted keys
-      `{ secret: "Air guitar", aliases: [], category: "Music", forbidden: ["instrument","pretend","rock"], budget: 3, difficulty: 3 }`,
-      // line comment
-      `{\n  // the card\n  "secret": "Air guitar", "aliases": [], "category": "Music",\n  "forbidden": ["instrument","pretend","rock"], "budget": 3, "difficulty": 3\n}`,
-      // trailing comma + fence
-      "```json\n{ \"secret\": \"Air guitar\", \"aliases\": [], \"category\": \"Music\", \"forbidden\": [\"instrument\",\"pretend\",\"rock\"], \"budget\": 3, \"difficulty\": 3, }\n```",
-    ];
-    for (const sin of sins) {
-      const r = payloadFromCompletion(sayLessCards, `<<<CARD>>>\n${sin}\n<<<END>>>`, "");
-      expect(r.ok, sin.slice(0, 40)).toBe(true);
+  it("survives the punctuation that used to shatter a JSON payload", () => {
+    // Quotes, braces, apostrophes, commas — all harmless between markers now.
+    const spicy = {
+      ...goodCard,
+      secret: "Mom's \"famous\" dip",
+      revealLine: "It's {mostly} mayo, and nobody minds, truly.",
+    };
+    const r = payloadFromCompletion(sayLessCards, asBlocks(spicy), "");
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.item.secret).toBe('Mom\'s "famous" dip');
+      expect(r.item.revealLine).toBe("It's {mostly} mayo, and nobody minds, truly.");
     }
   });
 
-  it("survives a code-fenced block — local models sprinkle those in", () => {
-    const text = "<<<CARD>>>\n```json\n" + JSON.stringify(goodCard) + "\n```\n<<<END>>>";
-    expect(payloadFromCompletion(sayLessCards, text, "").ok).toBe(true);
+  it("tolerates a model that bullets or quotes its multi-value lines", () => {
+    const r = payloadFromCompletion(
+      sayLessCards,
+      asBlocks({ ...goodCard, forbidden: '- instrument\n* "pretend"\n- rock' }),
+      "",
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.item.forbidden).toEqual(["instrument", "pretend", "rock"]);
   });
 });
 
@@ -208,7 +226,7 @@ describe("generation", () => {
   });
 
   it("reports a gate failure with its reason instead of swallowing it", async () => {
-    const bad = { ...goodCard, forbidden: ["guitar", "pretend", "rock"] };
+    const bad = { ...goodCard, forbidden: "guitar\npretend\nrock" };
     const r = await generateOne(sayLessCards, cfg(), { seed: 1, avoid: [] }, fakeModel([bad]));
     expect(r.ok).toBe(false);
     if (!r.ok && r.failure.kind === "gated") expect(r.failure.reason).toContain("unplayable");
