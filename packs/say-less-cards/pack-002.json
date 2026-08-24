@@ -1,0 +1,634 @@
+{
+  "provenance": {
+    "specId": "say-less-cards",
+    "specVersion": "1",
+    "model": "muse-local:latest",
+    "generatedAt": "2026-08-24T15:50:57.129Z",
+    "promptHash": "bb62f7cae333"
+  },
+  "items": [
+    {
+      "id": "sl-gen-food-coma",
+      "secret": "food coma",
+      "aliases": [
+        "post meal slump"
+      ],
+      "category": "Food",
+      "forbidden": [
+        "nap",
+        "heavy",
+        "stomach",
+        "pizza"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-phantom-vibration",
+      "secret": "phantom vibration",
+      "aliases": [
+        "pocket buzz"
+      ],
+      "category": "Everyday Life",
+      "forbidden": [
+        "phone",
+        "tingling",
+        "imaginary",
+        "notification"
+      ],
+      "budget": 4,
+      "difficulty": 3
+    },
+    {
+      "id": "sl-gen-family-group-chat",
+      "secret": "family group chat",
+      "aliases": [
+        "group chat",
+        "family chat"
+      ],
+      "category": "Family",
+      "forbidden": [
+        "messages",
+        "phone",
+        "meme",
+        "notification"
+      ],
+      "budget": 4,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-encore",
+      "secret": "encore",
+      "aliases": [],
+      "category": "Music",
+      "forbidden": [
+        "applause",
+        "standing",
+        "request",
+        "curtain"
+      ],
+      "budget": 4,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-paper-cut",
+      "secret": "paper cut",
+      "aliases": [],
+      "category": "Everyday Life",
+      "forbidden": [
+        "finger",
+        "envelope",
+        "sting",
+        "annoying"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-doomscrolling",
+      "secret": "doomscrolling",
+      "aliases": [
+        "doom scroll"
+      ],
+      "category": "Pop Culture",
+      "forbidden": [
+        "phone",
+        "bed",
+        "news",
+        "late"
+      ],
+      "budget": 3,
+      "difficulty": 3
+    },
+    {
+      "id": "sl-gen-first-snowfall",
+      "secret": "first snowfall",
+      "aliases": [
+        "first snow"
+      ],
+      "category": "Everyday Life",
+      "forbidden": [
+        "winter",
+        "white",
+        "cold",
+        "children"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-missing-sock",
+      "secret": "missing sock",
+      "aliases": [
+        "lost sock"
+      ],
+      "category": "Everyday Life",
+      "forbidden": [
+        "laundry",
+        "dryer",
+        "pair",
+        "drawer",
+        "mystery"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-mona-lisa",
+      "secret": "Mona Lisa",
+      "aliases": [
+        "La Gioconda"
+      ],
+      "category": "Pop Culture",
+      "forbidden": [
+        "painting",
+        "museum",
+        "smile",
+        "art",
+        "portrait"
+      ],
+      "budget": 3,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-earworm",
+      "secret": "earworm",
+      "aliases": [
+        "ear worm"
+      ],
+      "category": "Music",
+      "forbidden": [
+        "song",
+        "stuck",
+        "melody",
+        "humming",
+        "tune"
+      ],
+      "budget": 4,
+      "difficulty": 3
+    },
+    {
+      "id": "sl-gen-wizard-of-oz",
+      "secret": "Wizard of Oz",
+      "aliases": [],
+      "category": "Movies",
+      "forbidden": [
+        "ruby",
+        "shoes",
+        "yellow",
+        "road"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-empty-nest",
+      "secret": "empty nest",
+      "aliases": [],
+      "category": "Family",
+      "forbidden": [
+        "children",
+        "birds",
+        "quiet",
+        "leaving",
+        "parents"
+      ],
+      "budget": 3,
+      "difficulty": 3
+    },
+    {
+      "id": "sl-gen-desert-highway",
+      "secret": "desert highway",
+      "aliases": [],
+      "category": "Places",
+      "forbidden": [
+        "dust",
+        "sun",
+        "miles",
+        "lonely"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-small-town-diner",
+      "secret": "small town diner",
+      "aliases": [
+        "greasy spoon"
+      ],
+      "category": "Places",
+      "forbidden": [
+        "booth",
+        "coffee",
+        "neon",
+        "highway",
+        "waitress"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-laundromat",
+      "secret": "laundromat",
+      "aliases": [
+        "laundry mat"
+      ],
+      "category": "Places",
+      "forbidden": [
+        "clothes",
+        "washer",
+        "dryer",
+        "coins"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-training-montage",
+      "secret": "training montage",
+      "aliases": [],
+      "category": "Movies",
+      "forbidden": [
+        "gym",
+        "music",
+        "running",
+        "underdog"
+      ],
+      "budget": 4,
+      "difficulty": 3
+    },
+    {
+      "id": "sl-gen-post-credits-scene",
+      "secret": "post credits scene",
+      "aliases": [
+        "post credit scene"
+      ],
+      "category": "Movies",
+      "forbidden": [
+        "marvel",
+        "stinger",
+        "spoiler",
+        "teaser"
+      ],
+      "budget": 4,
+      "difficulty": 3
+    },
+    {
+      "id": "sl-gen-printer-jam",
+      "secret": "printer jam",
+      "aliases": [
+        "paper jam"
+      ],
+      "category": "Everyday Life",
+      "forbidden": [
+        "office",
+        "ink",
+        "queue",
+        "deadline"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-tupperware-lid",
+      "secret": "tupperware lid",
+      "aliases": [],
+      "category": "Everyday Life",
+      "forbidden": [
+        "kitchen",
+        "matching",
+        "storage",
+        "fridge"
+      ],
+      "budget": 5,
+      "difficulty": 3
+    },
+    {
+      "id": "sl-gen-sourdough-starter",
+      "secret": "sourdough starter",
+      "aliases": [
+        "sourdough culture"
+      ],
+      "category": "Food",
+      "forbidden": [
+        "bread",
+        "yeast",
+        "bubbly",
+        "jar"
+      ],
+      "budget": 4,
+      "difficulty": 3
+    },
+    {
+      "id": "sl-gen-gas-station",
+      "secret": "gas station",
+      "aliases": [
+        "service station"
+      ],
+      "category": "Places",
+      "forbidden": [
+        "pump",
+        "fuel",
+        "convenience",
+        "roadtrip"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-main-character-energy",
+      "secret": "main character energy",
+      "aliases": [],
+      "category": "Pop Culture",
+      "forbidden": [
+        "spotlight",
+        "walking",
+        "soundtrack",
+        "aesthetic"
+      ],
+      "budget": 3,
+      "difficulty": 3
+    },
+    {
+      "id": "sl-gen-vinyl-crackle",
+      "secret": "vinyl crackle",
+      "aliases": [
+        "record crackle"
+      ],
+      "category": "Music",
+      "forbidden": [
+        "turntable",
+        "needle",
+        "dusty",
+        "nostalgia"
+      ],
+      "budget": 4,
+      "difficulty": 3
+    },
+    {
+      "id": "sl-gen-knock-on-wood",
+      "secret": "knock on wood",
+      "aliases": [
+        "touch wood"
+      ],
+      "category": "Everyday Life",
+      "forbidden": [
+        "lucky",
+        "superstition",
+        "jinx",
+        "charm"
+      ],
+      "budget": 4,
+      "difficulty": 3
+    },
+    {
+      "id": "sl-gen-morning-coffee",
+      "secret": "morning coffee",
+      "aliases": [
+        "morning cup"
+      ],
+      "category": "Everyday Life",
+      "forbidden": [
+        "caffeine",
+        "mug",
+        "brew",
+        "kitchen"
+      ],
+      "budget": 5,
+      "difficulty": 1
+    },
+    {
+      "id": "sl-gen-leftover-pizza",
+      "secret": "leftover pizza",
+      "aliases": [],
+      "category": "Food",
+      "forbidden": [
+        "fridge",
+        "cold",
+        "cheese",
+        "midnight"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-wet-floor-sign",
+      "secret": "wet floor sign",
+      "aliases": [
+        "caution wet floor"
+      ],
+      "category": "Everyday Life",
+      "forbidden": [
+        "slip",
+        "spill",
+        "mop",
+        "hazard",
+        "puddle"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-corner-store",
+      "secret": "corner store",
+      "aliases": [
+        "bodega"
+      ],
+      "category": "Places",
+      "forbidden": [
+        "candy",
+        "milk",
+        "neighborhood",
+        "neon"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-secondhand-embarrassment",
+      "secret": "secondhand embarrassment",
+      "aliases": [
+        "vicarious embarrassment"
+      ],
+      "category": "Pop Culture",
+      "forbidden": [
+        "cringe",
+        "awkward",
+        "witness",
+        "social"
+      ],
+      "budget": 3,
+      "difficulty": 3
+    },
+    {
+      "id": "sl-gen-silent-treatment",
+      "secret": "silent treatment",
+      "aliases": [
+        "cold shoulder"
+      ],
+      "category": "Family",
+      "forbidden": [
+        "quiet",
+        "argument",
+        "ignoring",
+        "estranged",
+        "passive"
+      ],
+      "budget": 4,
+      "difficulty": 3
+    },
+    {
+      "id": "sl-gen-dryer-lint-trap",
+      "secret": "dryer lint trap",
+      "aliases": [
+        "lint trap"
+      ],
+      "category": "Everyday Life",
+      "forbidden": [
+        "laundry",
+        "clothes",
+        "machine",
+        "cleaning",
+        "fuzzy"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-sunday-dinner",
+      "secret": "Sunday dinner",
+      "aliases": [],
+      "category": "Family",
+      "forbidden": [
+        "table",
+        "roast",
+        "plates",
+        "gathering",
+        "church"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-parking-meter",
+      "secret": "parking meter",
+      "aliases": [],
+      "category": "Places",
+      "forbidden": [
+        "car",
+        "pay",
+        "coin",
+        "ticket"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-sweater-weather",
+      "secret": "sweater weather",
+      "aliases": [],
+      "category": "Everyday Life",
+      "forbidden": [
+        "autumn",
+        "cardigan",
+        "cold",
+        "jacket"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-fire-escape",
+      "secret": "fire escape",
+      "aliases": [],
+      "category": "Places",
+      "forbidden": [
+        "metal",
+        "stairs",
+        "building",
+        "window",
+        "landing"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-key-change",
+      "secret": "key change",
+      "aliases": [
+        "modulation"
+      ],
+      "category": "Music",
+      "forbidden": [
+        "chord",
+        "guitar",
+        "verse",
+        "bridge",
+        "solo"
+      ],
+      "budget": 3,
+      "difficulty": 3
+    },
+    {
+      "id": "sl-gen-sweaty-palms",
+      "secret": "sweaty palms",
+      "aliases": [],
+      "category": "Everyday Life",
+      "forbidden": [
+        "nervous",
+        "anxiety",
+        "handshake",
+        "interview"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-new-shoes",
+      "secret": "new shoes",
+      "aliases": [],
+      "category": "Everyday Life",
+      "forbidden": [
+        "first",
+        "walking",
+        "closet",
+        "squeak"
+      ],
+      "budget": 6,
+      "difficulty": 2
+    },
+    {
+      "id": "sl-gen-cliffhanger",
+      "secret": "cliffhanger",
+      "aliases": [
+        "cliff hanger"
+      ],
+      "category": "Movies",
+      "forbidden": [
+        "suspense",
+        "twist",
+        "episode",
+        "finale"
+      ],
+      "budget": 4,
+      "difficulty": 3
+    },
+    {
+      "id": "sl-gen-shower-singing",
+      "secret": "shower singing",
+      "aliases": [
+        "singing in shower"
+      ],
+      "category": "Music",
+      "forbidden": [
+        "bathroom",
+        "echo",
+        "offkey",
+        "private",
+        "mirror"
+      ],
+      "budget": 5,
+      "difficulty": 2
+    }
+  ]
+}
