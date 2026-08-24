@@ -14,7 +14,7 @@ import {
   EngineError,
 } from "./machine.js";
 import { STARTER_DECK } from "./deck.js";
-import type { EngineEvent, SessionState } from "./types.js";
+import type { Card, EngineEvent, SessionState } from "./types.js";
 
 export const SAY_LESS_MANIFEST: GameManifest = {
   gameId: "say-less",
@@ -46,11 +46,32 @@ interface EndPayload {
   reason: "TIMEOUT" | "HOST_ENDED";
 }
 
+/**
+ * The deck this adapter deals from. Defaults to the hand-authored starter deck
+ * so the engine and its tests stay self-contained and I/O-free. The server
+ * calls configureDeck() at boot with starter + forged packs merged.
+ *
+ * The pure engine still takes its deck as an argument — only this adapter,
+ * which exists to satisfy kit's fixed GameModule signature, holds it.
+ */
+let activeDeck: Card[] = STARTER_DECK;
+
+/** Install the deck the arcade deals from. Called once, at server boot. */
+export function configureDeck(cards: Card[]): void {
+  if (cards.length === 0) throw new EngineError("EMPTY_DECK", "Refusing to configure an empty deck.");
+  activeDeck = cards;
+}
+
+/** How many cards are currently dealable — for boot logging. */
+export function deckSize(): number {
+  return activeDeck.length;
+}
+
 export const sayLess: GameModule<SessionState, EngineEvent> = {
   manifest: SAY_LESS_MANIFEST,
 
   createSession(players, seed) {
-    return createSession(players, STARTER_DECK, { seed });
+    return createSession(players, activeDeck, { seed });
   },
 
   command(state, name, payload, now) {

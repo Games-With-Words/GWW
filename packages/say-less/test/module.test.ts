@@ -46,3 +46,32 @@ describe("arcade integration", () => {
     expect(() => sayLess.command(state, "nope", {}, 0)).toThrowError(/no command/);
   });
 });
+
+// ---- deck injection: the arcade deals from whatever the server configured ----
+import { describe as ddesc, expect as dexp, it as dit, afterEach } from "vitest";
+import { configureDeck, deckSize, sayLess as mod, STARTER_DECK as STARTER } from "../src/index.js";
+import type { Card as DCard } from "../src/index.js";
+
+ddesc("configureDeck", () => {
+  afterEach(() => configureDeck(STARTER));
+
+  dit("defaults to the hand-authored starter deck", () => {
+    dexp(deckSize()).toBe(STARTER.length);
+  });
+
+  dit("deals from an installed deck without touching the pure engine", () => {
+    const extra: DCard = {
+      id: "sl-gen-test-card", secret: "Test card", aliases: [], category: "Family",
+      forbidden: ["one", "two", "three"], budget: 3, difficulty: 2,
+    };
+    configureDeck([...STARTER, extra]);
+    dexp(deckSize()).toBe(STARTER.length + 1);
+    const players = [{ id: "a", displayName: "A" }, { id: "b", displayName: "B" }, { id: "c", displayName: "C" }];
+    const t = mod.createSession(players, 42);
+    dexp(t.state.deck).toHaveLength(STARTER.length + 1);
+  });
+
+  dit("refuses an empty deck rather than dealing nothing", () => {
+    dexp(() => configureDeck([])).toThrow();
+  });
+});

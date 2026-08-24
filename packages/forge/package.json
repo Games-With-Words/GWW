@@ -1,27 +1,23 @@
 {
-  "name": "@gww/server",
+  "name": "@gww/forge",
   "version": "0.1.0",
-  "description": "Games With Words platform server — private lobbies, realtime WebSocket gateway, server-authoritative game sessions.",
+  "description": "Offline content pipeline for Games With Words — generates, gates and versions content packs. NEVER runs on the gameplay path.",
   "license": "GPL-3.0-only",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": { "gww-forge": "dist/cli.js" },
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "start": "node dist/index.js"
+    "test": "vitest run"
   },
   "dependencies": {
-    "@gww/kit": "workspace:*",
     "@gww/say-less": "workspace:*",
-    "ws": "^8.18.0",
-    "sentinel-blocks": "^1.0.2",
-    "@gww/forge": "workspace:*"
+    "sentinel-blocks": "^1.0.2"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "@types/ws": "^8.5.12",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   }
