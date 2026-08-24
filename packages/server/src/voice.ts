@@ -237,10 +237,9 @@ export class VoiceService {
           { role: "user", content: `Write tonight's opening line. Random seed: ${Math.floor(this.now() / 1000)}.` },
         ],
         temperature: 1.0,
-        // muse thinks before she speaks — Mark's call: let her. The budget has
-        // to cover the FULL deliberation plus the line; 500 was still eaten by
-        // thinking (content:"" with a long message.thinking, seen live).
-        max_tokens: 8192,
+        // NO token cap. muse thinks before she speaks — Mark's call: let her.
+        // Every cap we tried (80, 500) choked the deliberation and content
+        // came back empty. She's local, on our own A6000 — tokens are free.
       }),
     });
     if (!chatRes.ok) return { status: `line_failed_${chatRes.status}`, cue };
