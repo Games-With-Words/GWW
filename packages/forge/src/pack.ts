@@ -64,7 +64,43 @@ function nextPackPath(specId: string, base?: string): string {
   return join(dir, `pack-${String(next).padStart(3, "0")}.json`);
 }
 
-/** Write a new pack. Refuses to touch an existing file — additive only. */
+/**
+ * Open a pack for INCREMENTAL writing.
+ *
+ * A 40-card run takes the better part of an hour, and writing only at the end
+ * meant a Ctrl-C threw away every accepted card. Learned the hard way: the
+ * first good card muse ever wrote ("dmv waiting room") was lost this way.
+ *
+ * Each add() rewrites the whole file. The files are small, the writes are rare,
+ * and the run becomes interruptible at any moment without losing work.
+ */
+export function openPack<T>(
+  spec: ContentSpec<T>,
+  model: string,
+  base?: string,
+): { file: string; add(item: T): void; count(): number } {
+  const file = nextPackPath(spec.id, base);
+  const pack: Pack<T> = {
+    provenance: {
+      specId: spec.id,
+      specVersion: spec.version,
+      model,
+      generatedAt: new Date().toISOString(),
+      promptHash: promptHash(spec as ContentSpec<unknown>),
+    },
+    items: [],
+  };
+  return {
+    file,
+    add(item: T): void {
+      pack.items.push(item);
+      writeFileSync(file, `${JSON.stringify(pack, null, 2)}\n`);
+    },
+    count: () => pack.items.length,
+  };
+}
+
+/** Write a new pack in one shot. Refuses to touch an existing file — additive only. */
 export function writePack<T>(
   spec: ContentSpec<T>,
   items: T[],

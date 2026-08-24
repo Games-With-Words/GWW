@@ -7,9 +7,12 @@ import {
   sayLessCards,
   risLines,
   payloadFromCompletion,
+  readStream,
+  payloadComplete,
   generateOne,
   generateBatch,
   writePack,
+  openPack,
   readPackItems,
   existingKeys,
   listPacks,
@@ -213,6 +216,87 @@ describe("sentinel extraction — field blocks, nothing to parse", () => {
   });
 });
 
+describe("streaming — the fix for the 504", () => {
+  /** An SSE stream, one frame per chunk, the way PIN actually replies. */
+  const sse = (chunks: { content?: string; thinking?: string }[], finish?: string): string => {
+    const frames = chunks.map((c) => `data: ${JSON.stringify({ choices: [{ delta: c }] })}`);
+    if (finish !== undefined) frames.push(`data: ${JSON.stringify({ choices: [{ finish_reason: finish, delta: {} }] })}`);
+    return `${frames.join("\n\n")}\n\ndata: [DONE]\n\n`;
+  };
+  const streamRes = (body: string): Response =>
+    new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+
+  it("folds deltas from both channels into one payload", async () => {
+    const blocks = asBlocks(goodCard);
+    const chunks = blocks.match(/[\s\S]{1,17}/g)!.map((piece) => ({ content: piece }));
+    const r = await readStream(streamRes(sse([{ thinking: "weighing options" }, ...chunks])), sayLessCards);
+    expect(r.thinking).toBe("weighing options");
+    const v = payloadFromCompletion(sayLessCards, r.content, r.thinking);
+    expect(v.ok).toBe(true);
+    if (v.ok) expect(v.item.secret).toBe("Air guitar");
+  });
+
+  it("stops reading once every required block is CLOSED — the model said DONE", async () => {
+    const trailing = "\nand now let me reconsider everything at enormous length...";
+    const body = sse([{ content: asBlocks(goodCard) }, { content: trailing }]);
+    const r = await readStream(streamRes(body), sayLessCards);
+    expect(r.earlyStop).toBe(true);
+    // The rambling after the closed set was never consumed.
+    expect(r.content).not.toContain("reconsider");
+  });
+
+  it("does NOT stop early on a half-written set — no eager parsing", async () => {
+    const { budget: _d, difficulty: _e, ...partial } = goodCard;
+    const r = await readStream(streamRes(sse([{ content: asBlocks(partial) }])), sayLessCards);
+    expect(r.earlyStop).toBe(false);
+    const v = payloadFromCompletion(sayLessCards, r.content, r.thinking);
+    expect(v.ok).toBe(false);
+  });
+
+  it("waits for the closing marker before considering a block done", async () => {
+    // Opening marker and value arrive, but <<<END>>> never does.
+    const open = "<<<FIELD secret>>>\nAir guitar";
+    const r = await readStream(streamRes(sse([{ content: open }])), sayLessCards);
+    expect(r.earlyStop).toBe(false);
+    expect(payloadComplete(sayLessCards, r.content, r.thinking)).toBe(false);
+  });
+
+  it("carries finish_reason through so truncation is still detectable", async () => {
+    const r = await readStream(streamRes(sse([{ content: "cut off mid-" }], "length")), sayLessCards);
+    expect(r.finishReason).toBe("length");
+  });
+
+  it("survives a partial JSON frame mid-stream", async () => {
+    const body = `data: {"choices":[{"delta":{"content":"hi "}}]}\n\ndata: {"choices":[{"delta":\n\ndata: ${JSON.stringify({ choices: [{ delta: { content: "there" } }] })}\n\ndata: [DONE]\n\n`;
+    const r = await readStream(streamRes(body), sayLessCards);
+    expect(r.content).toBe("hi there");
+  });
+
+  it("still reads a NON-streamed body, for servers that ignore stream:true", async () => {
+    const body = JSON.stringify({ choices: [{ message: { content: asBlocks(goodCard) } }] });
+    const r = await readStream(new Response(body, { status: 200, headers: { "content-type": "application/json" } }), sayLessCards);
+    expect(payloadFromCompletion(sayLessCards, r.content, r.thinking).ok).toBe(true);
+  });
+
+  it("a single closed block ends a text spec", () => {
+    const clue = risLines("clue");
+    expect(payloadComplete(clue, "<<<LINE>>>\nPhones up, the clue landed.\n<<<END>>>", "")).toBe(true);
+    expect(payloadComplete(clue, "<<<LINE>>>\nPhones up", "")).toBe(false);
+  });
+
+  it("retries a gateway 5xx once before spending the attempt", async () => {
+    let calls = 0;
+    const flaky = (async () => {
+      calls += 1;
+      if (calls === 1) return new Response("gateway timeout", { status: 504 });
+      return streamRes(sse([{ content: asBlocks(goodCard) }]));
+    }) as typeof fetch;
+    const res = await generateBatch(sayLessCards, cfg(), 1, { fetcher: flaky, maxAttempts: 1 });
+    expect(calls).toBe(2);
+    expect(res.accepted).toHaveLength(1);
+  });
+});
+
 describe("generation", () => {
   it("accepts a card the model wrapped properly", async () => {
     const r = await generateOne(sayLessCards, cfg(), { seed: 1, avoid: [] }, fakeModel([goodCard]));
@@ -324,6 +408,32 @@ describe("packs — additive, versioned, never overwritten", () => {
     // The earlier pack is byte-for-byte untouched.
     expect(readFileSync(first.file, "utf8")).toBe(before);
     expect(listPacks(sayLessCards.id, base)).toHaveLength(2);
+  });
+
+  it("saves each item AS IT LANDS so a Ctrl-C keeps the work", async () => {
+    const base = mkdtempSync(join(tmpdir(), "gww-packs-"));
+    const p = openPack(sayLessCards, "muse-local:latest", base);
+    // Nothing generated yet, but the file exists the moment the first lands.
+    p.add(card("Karaoke"));
+    const afterOne = JSON.parse(readFileSync(p.file, "utf8")) as { items: unknown[] };
+    expect(afterOne.items).toHaveLength(1);
+    p.add(card("Leftovers"));
+    const afterTwo = JSON.parse(readFileSync(p.file, "utf8")) as { items: unknown[] };
+    expect(afterTwo.items).toHaveLength(2);
+    expect(p.count()).toBe(2);
+  });
+
+  it("persists through onAccept during a batch, not only at the end", async () => {
+    const base = mkdtempSync(join(tmpdir(), "gww-packs-"));
+    const p = openPack(sayLessCards, "m", base);
+    const seen: string[] = [];
+    await generateBatch(sayLessCards, cfg(), 1, {
+      fetcher: fakeModel([goodCard]),
+      maxAttempts: 1,
+      onAccept: (item) => { p.add(item); seen.push(item.secret); },
+    });
+    expect(seen).toEqual(["Air guitar"]);
+    expect(readPackItems<Card>(sayLessCards.id, base)).toHaveLength(1);
   });
 
   it("stamps provenance so a bad batch is traceable to its model and prompt", () => {

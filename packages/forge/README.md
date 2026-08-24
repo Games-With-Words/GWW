@@ -25,6 +25,7 @@ So: generate offline, gate hard, write to disk, load at boot.
 | `GWW_FORGE_MODEL` | `muse-local:latest` | Which model writes. Use the exact id from `models`. |
 | `GWW_FORGE_TEMP` | `1.0` | Sampling temperature. Variety is the point; lowering it makes packs samey. |
 | `AIAS_URL` | `https://aiassist.net` | PIN base url. |
+| `GWW_FORGE_MAX_TOKENS` | `16384` | Generation ceiling. Omitting it is NOT unlimited — the server default applies, and that default cut muse off mid-thought. |
 | `GWW_PACK_DIR` | `packs` | Where packs are written and read. |
 
 Run `models` first — it reads the live PIN network list, so the model id is a
@@ -66,9 +67,10 @@ node packages/forge/dist/cli.js list
 node packages/forge/dist/cli.js ris-lines clue 8
 ```
 
-The run prints every accept and reject with its reason, then writes
-`packs/<spec>/pack-NNN.json`. **Review the pack, then commit it.** Nothing is
-live until it is on disk in git.
+The run prints every accept and reject with its reason, and writes
+`packs/<spec>/pack-NNN.json` **as each card lands** — so Ctrl-C at card 12 of
+40 keeps all twelve. **Review the pack, then commit it.** Nothing is live until
+it is on disk in git.
 
 ## How the model hands content back
 
@@ -108,6 +110,23 @@ empty.
 
 A truncated completion (`finish_reason: "length"`) is rejected outright — it
 cannot have closed a block, so its fragment is never parsed.
+
+## Streaming, and why
+
+The request streams (`stream: true`). A 16k-token deliberation takes minutes,
+and a non-streamed request sits idle for all of it — the proxy killed those
+with a **504 before muse ever finished thinking**. Streaming keeps bytes
+moving, so nothing idles out, and you get a live heartbeat in the terminal
+instead of a frozen prompt.
+
+It also gives the model a real way to say DONE: **once every required block is
+closed, we stop reading and free the GPU.** That is not eager parsing — a block
+is never judged until its `<<<END>>>` has arrived, and a half-written set keeps
+the stream open. A server that ignores `stream: true` still works; the reader
+falls back to parsing a single completion object.
+
+Gateway 5xx (502/503/504) is retried once — the local model is fine, the proxy
+blinked.
 
 ## Adding a spec
 

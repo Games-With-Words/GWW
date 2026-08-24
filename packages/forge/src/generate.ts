@@ -125,11 +125,121 @@ export function lines(v: string | undefined): string[] {
     .filter((l) => l.length > 0);
 }
 
+interface StreamResult {
+  content: string;
+  thinking: string;
+  finishReason: string | undefined;
+  /** True when we closed the connection ourselves because the payload was done. */
+  earlyStop: boolean;
+}
+
+/**
+ * Read an SSE chat-completion stream to the end — or until the model has
+ * closed every block we need, whichever comes first.
+ *
+ * Why streaming: a 16k-token deliberation takes minutes, and a non-streamed
+ * request sits idle for all of it. The proxy killed those with a 504. With a
+ * stream, bytes keep moving and nothing idles out.
+ *
+ * Why early stop: the closing markers ARE the model saying DONE. Once every
+ * required block is closed there is nothing left to wait for, so we stop
+ * reading and free the GPU instead of letting it ramble to the token ceiling.
+ * This is not eager parsing — we never judge a block until it is closed.
+ *
+ * Also handles a NON-streamed body, so a server that ignores stream:true (and
+ * every test fixture) still works.
+ */
+export async function readStream<T>(
+  res: Response,
+  spec: ContentSpec<T>,
+  onToken?: (chars: number) => void,
+): Promise<StreamResult> {
+  const ct = res.headers.get("content-type") ?? "";
+  const raw = await res.text();
+
+  // Not an SSE stream? Parse it as a single completion object.
+  if (!ct.includes("event-stream") && !raw.startsWith("data:")) {
+    const body = JSON.parse(raw) as {
+      choices?: {
+        finish_reason?: string;
+        message?: { content?: string; thinking?: string; reasoning_content?: string };
+        text?: string;
+      }[];
+    };
+    const c = body.choices?.[0];
+    return {
+      content: c?.message?.content ?? c?.text ?? "",
+      thinking: c?.message?.thinking ?? c?.message?.reasoning_content ?? "",
+      finishReason: c?.finish_reason,
+      earlyStop: false,
+    };
+  }
+  return accumulateSse(raw, spec, onToken);
+}
+
+/** Fold SSE `data:` frames into the two channels. */
+export function accumulateSse<T>(
+  raw: string,
+  spec: ContentSpec<T>,
+  onToken?: (chars: number) => void,
+): StreamResult {
+  let content = "";
+  let thinking = "";
+  let finishReason: string | undefined;
+  let earlyStop = false;
+
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data:")) continue;
+    const payload = trimmed.slice(5).trim();
+    if (payload === "[DONE]") break;
+    let frame: {
+      choices?: {
+        finish_reason?: string;
+        delta?: { content?: string; thinking?: string; reasoning_content?: string };
+        message?: { content?: string; thinking?: string; reasoning_content?: string };
+      }[];
+    };
+    try {
+      frame = JSON.parse(payload) as typeof frame;
+    } catch {
+      continue; // a partial frame; the next one carries the rest
+    }
+    const c = frame.choices?.[0];
+    const d = c?.delta ?? c?.message;
+    if (d?.content !== undefined) content += d.content;
+    if (d?.thinking !== undefined) thinking += d.thinking;
+    if (d?.reasoning_content !== undefined) thinking += d.reasoning_content;
+    if (c?.finish_reason !== undefined && c.finish_reason !== null) finishReason = c.finish_reason;
+    onToken?.(content.length + thinking.length);
+    if (payloadComplete(spec, content, thinking)) {
+      earlyStop = true;
+      break;
+    }
+  }
+  return { content, thinking, finishReason, earlyStop };
+}
+
+/** Has the model closed everything we asked for? Closed blocks only. */
+export function payloadComplete<T>(spec: ContentSpec<T>, content: string, thinking: string): boolean {
+  for (const channel of [content, thinking]) {
+    if (channel.length === 0) continue;
+    if (spec.payload === "text") {
+      if (extractBlocks(channel, spec.tag).length > 0) return true;
+      continue;
+    }
+    const seen = new Set(extractTaggedBlocks(channel, spec.tag).map((b) => b.arg));
+    const required = spec.required ?? [];
+    if (required.length > 0 && required.every((f) => seen.has(f))) return true;
+  }
+  return false;
+}
+
 /** One generation attempt. No token cap — the model thinks as long as it needs. */
 export async function generateOne<T>(
   spec: ContentSpec<T>,
   cfg: ForgeConfig,
-  ctx: { seed: number; avoid: string[] },
+  ctx: { seed: number; avoid: string[]; onToken?: (chars: number) => void },
   fetcher: typeof fetch = fetch,
   /** A failed prior reply, replayed so the model can be corrected in-turn. */
   correction?: { badReply: string },
@@ -169,6 +279,11 @@ export async function generateOne<T>(
         // default applies, and that default cut muse off mid-deliberation.
         max_tokens: cfg.maxTokens,
         num_predict: cfg.maxTokens,
+        // STREAM. A 16k-token think takes minutes, and a non-streamed request
+        // sits idle that whole time — the proxy gave up with a 504. Streaming
+        // keeps bytes flowing, so nothing times out, and the model tells us
+        // it's DONE by closing its blocks. Mark called this from the start.
+        stream: true,
       }),
     });
   } catch (err) {
@@ -176,18 +291,15 @@ export async function generateOne<T>(
   }
   if (!res.ok) return { ok: false, failure: { kind: "http", status: res.status } };
 
-  const body = (await res.json()) as {
-    choices?: {
-      finish_reason?: string;
-      message?: { content?: string; thinking?: string; reasoning_content?: string };
-      text?: string;
-    }[];
-  };
-  const choice = body.choices?.[0];
-  if (choice?.finish_reason === "length") return { ok: false, failure: { kind: "truncated" } };
+  let stream: StreamResult;
+  try {
+    stream = await readStream(res, spec, ctx.onToken);
+  } catch (err) {
+    return { ok: false, failure: { kind: "threw", detail: err instanceof Error ? err.message : String(err) } };
+  }
+  if (stream.finishReason === "length") return { ok: false, failure: { kind: "truncated" } };
 
-  const content = choice?.message?.content ?? choice?.text ?? "";
-  const thinking = choice?.message?.thinking ?? choice?.message?.reasoning_content ?? "";
+  const { content, thinking } = stream;
   const verdict = payloadFromCompletion(spec, content, thinking);
   if (verdict.ok) return { ok: true, item: verdict.item };
 
@@ -220,6 +332,10 @@ export async function generateBatch<T>(
     fetcher?: typeof fetch;
     seed?: number;
     onProgress?: (msg: string) => void;
+    /** Streaming heartbeat — total chars received so far on this attempt. */
+    onTick?: (chars: number) => void;
+    /** Called the moment an item passes — lets the caller persist as it goes. */
+    onAccept?: (item: T) => void;
   } = {},
 ): Promise<BatchResult<T>> {
   const avoid = new Set(opts.avoid ?? []);
@@ -232,12 +348,25 @@ export async function generateBatch<T>(
   const rejected: BatchResult<T>["rejected"] = [];
 
   for (let attempt = 1; attempt <= maxAttempts && accepted.length < want; attempt++) {
-    let r = await generateOne(spec, cfg, { seed: baseSeed + attempt, avoid: [...avoid] }, fetcher);
+    // Heartbeat: a 16k think is minutes of silence otherwise. Show it living.
+    let ticked = 0;
+    const onToken = (chars: number): void => {
+      if (chars - ticked < 400) return;
+      ticked = chars;
+      opts.onTick?.(chars);
+    };
+    let r = await generateOne(spec, cfg, { seed: baseSeed + attempt, avoid: [...avoid], onToken }, fetcher);
+    // A gateway hiccup (502/503/504) is transient — the local model is fine,
+    // the proxy blinked. Try once more before spending the attempt.
+    if (!r.ok && r.failure.kind === "http" && r.failure.status >= 502) {
+      log(`  [${attempt}] gateway ${r.failure.status} — retrying once`);
+      r = await generateOne(spec, cfg, { seed: baseSeed + attempt, avoid: [...avoid], onToken }, fetcher);
+    }
     // One corrective round when the model answered in prose. Teach the format,
     // never parse around it — that road led to the JSON repair pile.
     if (!r.ok && r.failure.kind === "no_block" && r.raw !== undefined && r.raw.length > 0) {
       log(`  [${attempt}] no blocks — showing it its own reply and asking again`);
-      r = await generateOne(spec, cfg, { seed: baseSeed + attempt, avoid: [...avoid] }, fetcher, {
+      r = await generateOne(spec, cfg, { seed: baseSeed + attempt, avoid: [...avoid], onToken }, fetcher, {
         badReply: r.raw,
       });
     }
@@ -260,6 +389,8 @@ export async function generateBatch<T>(
     }
     avoid.add(key);
     accepted.push(r.item);
+    // Persist NOW. A long run must survive a Ctrl-C without losing work.
+    opts.onAccept?.(r.item);
     log(`  [${attempt}] accepted: ${key}  (${accepted.length}/${want})`);
   }
   return { accepted, rejected };

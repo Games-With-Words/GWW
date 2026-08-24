@@ -11,7 +11,7 @@
  */
 
 import { forgeConfigFromEnv, generateBatch, describe } from "./generate.js";
-import { existingKeys, writePack, readPackItems } from "./pack.js";
+import { existingKeys, openPack, readPackItems } from "./pack.js";
 import { sayLessCards } from "./specs/say-less-cards.js";
 import { CUES, risLines, type Cue } from "./specs/ris-lines.js";
 import type { ContentSpec } from "./spec.js";
@@ -101,10 +101,30 @@ async function main(): Promise<number> {
   console.log(`forging ${want} x ${spec.id} (v${spec.version}) with ${cfg.model}`);
   console.log(`avoiding ${avoid.length} key(s) already in packs\n`);
 
+  // Open the pack BEFORE generating: every accepted item is written the moment
+  // it passes, so Ctrl-C at card 12 of 40 keeps all twelve.
+  const pack = openPack(spec, cfg.model, undefined);
+  console.log(`writing to ${pack.file} as cards land — safe to Ctrl-C\n`);
+  const onSignal = (): void => {
+    console.log(`\ninterrupted — ${pack.count()} item(s) already saved to ${pack.file}`);
+    process.exit(pack.count() > 0 ? 0 : 130);
+  };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+
   const started = Date.now();
   const { accepted, rejected } = await generateBatch(spec, cfg, want, {
     avoid,
-    onProgress: (m) => console.log(m),
+    onProgress: (m) => {
+      if (process.stdout.isTTY) process.stdout.write("\r\x1b[K");
+      console.log(m);
+    },
+    // Streaming heartbeat, overwritten in place — proof of life during a
+    // multi-minute deliberation instead of a frozen terminal.
+    onTick: (chars) => {
+      if (process.stdout.isTTY) process.stdout.write(`\r\x1b[K    ...thinking (${chars} chars)`);
+    },
+    onAccept: (item) => pack.add(item),
   });
   const secs = Math.round((Date.now() - started) / 1000);
 
@@ -124,11 +144,10 @@ async function main(): Promise<number> {
   }
 
   if (accepted.length === 0) {
-    console.log("\nnothing accepted — no pack written.");
+    console.log("\nnothing accepted — the pack file is empty, delete it if you like.");
     return 1;
   }
-  const { file, count } = writePack(spec, accepted, cfg.model);
-  console.log(`\nwrote ${count} item(s) -> ${file}`);
+  console.log(`\nwrote ${pack.count()} item(s) -> ${pack.file}`);
   console.log("review it, then commit it. Nothing is live until it's on disk in git.");
   return 0;
 }
