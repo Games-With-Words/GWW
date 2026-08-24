@@ -65,7 +65,7 @@ export function openSocket(
   roomId: string,
   token: string,
   onMessage: (msg: { type: string; [k: string]: unknown }) => void,
-  onClose: () => void,
+  onClose: (code: number) => void,
   asBoard = false,
 ): Socket {
   const ws = new WebSocket(wsUrl(location.host, location.protocol === "https:", roomId, token, asBoard));
@@ -76,7 +76,7 @@ export function openSocket(
       /* ignore non-JSON frames */
     }
   };
-  ws.onclose = onClose;
+  ws.onclose = (ev) => onClose(ev.code);
   return {
     send: (msg) => ws.send(JSON.stringify(msg)),
     close: () => ws.close(),

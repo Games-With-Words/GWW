@@ -43,9 +43,15 @@ describe("validateLine — the deterministic gate before a render is spent", () 
     expect(validateLine("{json: true} says the model sometimes ok")).toBeUndefined();
     expect(validateLine("12 34 56 78")).toBeUndefined();
   });
-  it("keeps only the first line of a rambling answer", () => {
-    expect(validateLine("Welcome to game night my friends!\nHere is another option:")).toBe(
+  it("takes the LAST line of a rambling answer — local models narrate, then answer", () => {
+    expect(validateLine("Sure! Here is a fun opening line:\nWelcome to game night my friends!")).toBe(
       "Welcome to game night my friends!",
+    );
+  });
+
+  it("strips think-blocks before judging the line", () => {
+    expect(validateLine("<think>the user wants a party line, keep it short</think>Phones up, chaos out — welcome to Say Less!")).toBe(
+      "Phones up, chaos out — welcome to Say Less!",
     );
   });
 });

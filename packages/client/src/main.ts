@@ -98,7 +98,17 @@ function connect(rid: string, token: string, board: boolean): void {
       screen = { kind: "room" };
       render();
     },
-    () => {
+    (code) => {
+      // 4404 = the room is gone. Reconnecting forever just floods the server
+      // log with zombies (seen live: dead tabs hammering every 2s). Stop, and
+      // tell the human to start fresh.
+      if (code === 4404) {
+        room = undefined;
+        screen = { kind: "home", games: [] };
+        formError = "That room has ended. Start a new one!";
+        void boot();
+        return;
+      }
       if (screen.kind === "room") setTimeout(() => connect(roomId, myToken, asBoard), 1500);
     },
     board,

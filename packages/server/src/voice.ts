@@ -128,8 +128,12 @@ const lineSystemPrompt = (cue: Cue): string =>
 
 /** Deterministic sanity gate for generated lines — reject junk before it costs a render. */
 export function validateLine(raw: string): string | undefined {
-  let line = raw.trim().replace(/^["'“‘]+|["'”’]+$/g, "").trim();
-  if (line.includes("\n")) line = line.split("\n")[0]!.trim();
+  // Local models often narrate before they answer — strip reasoning blocks
+  // and take the LAST non-empty line, which is where the actual answer lives.
+  let line = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  const parts = line.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  if (parts.length > 0) line = parts[parts.length - 1]!;
+  line = line.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
   const words = line.split(/\s+/).filter(Boolean);
   if (words.length < 4 || words.length > 30) return undefined;
   if (/https?:|<|>|\{|\}/.test(line)) return undefined;
@@ -238,8 +242,13 @@ export class VoiceService {
     });
     if (!chatRes.ok) return { status: `line_failed_${chatRes.status}`, cue };
     const chat = (await chatRes.json()) as { choices?: { message?: { content?: string } }[] };
-    const line = validateLine(chat.choices?.[0]?.message?.content ?? "");
-    if (line === undefined) return { status: "line_rejected", cue };
+    const raw = chat.choices?.[0]?.message?.content ?? "";
+    const line = validateLine(raw);
+    if (line === undefined) {
+      // Show WHAT was rejected — a bare "line_rejected" cost us a debugging loop.
+      console.log(`[voice] rejected muse output (${raw.length} chars): ${JSON.stringify(raw.slice(0, 200))}`);
+      return { status: "line_rejected", cue };
+    }
 
     const hash = createHash("sha256").update(line).digest("hex").slice(0, 16);
     if (this.manifest.entries.some((e) => e.hash === hash)) return { status: "duplicate", cue };
@@ -271,11 +280,23 @@ export class VoiceService {
   }
 
   /** Drip wrapper: EVERY outcome hits the log — a silent failure cost us a
-   *  night of "why is audioUrl null". Never again. */
+   *  night of "why is audioUrl null". Never again. A failed attempt retries in
+   *  90s (up to 5 in a row) instead of waiting hours for the next drip tick. */
+  private failStreak = 0;
   private async replenishLogged(): Promise<void> {
     try {
       const r = await this.replenishOnce();
-      if (r.status !== "ok") console.log(`[voice] replenish: ${r.status}${r.cue !== undefined ? ` (cue: ${r.cue})` : ""}`);
+      if (r.status === "ok") {
+        this.failStreak = 0;
+        return;
+      }
+      console.log(`[voice] replenish: ${r.status}${r.cue !== undefined ? ` (cue: ${r.cue})` : ""}`);
+      const transient = r.status !== "disabled" && r.status !== "budget_exhausted";
+      if (transient && this.failStreak < 5) {
+        this.failStreak += 1;
+        console.log(`[voice] retrying in 90s (attempt ${this.failStreak}/5)`);
+        setTimeout(() => void this.replenishLogged(), 90_000).unref?.();
+      }
     } catch (err) {
       console.log(`[voice] replenish threw: ${err instanceof Error ? err.message : String(err)}`);
     }
