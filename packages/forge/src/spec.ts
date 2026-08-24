@@ -130,6 +130,38 @@ export function sentinelLesson(spec: {
   ].join("\n");
 }
 
+/**
+ * The format reminder appended to EVERY user message.
+ *
+ * Learned live: gemma4:26b ignored a system-only lesson and replied in markdown
+ * bullets ("*Secret:* Disco Ball"), writing several cards at once. muse honours
+ * system instructions; other models weight the LAST turn far more heavily. So
+ * the contract is restated where it cannot be missed.
+ */
+export function formatReminder(spec: {
+  tag: string;
+  payload: "fields" | "text";
+  fields?: readonly string[] | undefined;
+}): string {
+  if (spec.payload === "text") {
+    return [
+      "",
+      "---",
+      `Reply with ONE <<<${spec.tag}>>> block and nothing else after it.`,
+      "No markdown, no bullets, no headings, no labels.",
+    ].join("\n");
+  }
+  return [
+    "",
+    "---",
+    "REQUIRED OUTPUT FORMAT — reply with exactly these blocks, in this order,",
+    "and NOTHING else after them. No markdown, no bullets, no headings, no",
+    "asterisks, no numbered lists. Write ONE item only, not several.",
+    "",
+    ...(spec.fields ?? []).flatMap((f) => [`<<<${spec.tag} ${f}>>>`, `...`, "<<<END>>>"]),
+  ].join("\n");
+}
+
 /** The full system prompt for a spec: its brief, then the sentinel lesson. */
 export function systemPrompt(spec: ContentSpec<unknown>): string {
   return `${spec.brief}\n${sentinelLesson(spec)}`;

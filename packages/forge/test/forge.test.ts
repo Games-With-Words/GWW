@@ -257,6 +257,49 @@ describe("generation", () => {
     expect(r.ok).toBe(true);
   });
 
+  it("puts the format reminder on the USER turn, where every model reads it", async () => {
+    // gemma4:26b ignored a system-only lesson and replied in markdown.
+    let seen: { role: string; content: string }[] = [];
+    const spy = (async (_u: RequestInfo | URL, init?: RequestInit) => {
+      seen = (JSON.parse(String(init?.body)) as { messages: typeof seen }).messages;
+      return new Response(JSON.stringify({ choices: [{ message: { content: asBlocks(goodCard) } }] }), { status: 200 });
+    }) as typeof fetch;
+    await generateOne(sayLessCards, cfg(), { seed: 1, avoid: [] }, spy);
+    const user = seen.find((m) => m.role === "user")!;
+    expect(user.content).toContain("REQUIRED OUTPUT FORMAT");
+    expect(user.content).toContain("<<<FIELD secret>>>");
+    expect(user.content).toContain("ONE item only, not several");
+  });
+
+  it("corrects a model that answered in markdown instead of parsing its prose", async () => {
+    const markdown = "*Secret:* Disco Ball\n*   Dance\n*   Mirror\n*Budget:* 4";
+    let call = 0;
+    const stubborn = (async (_u: RequestInfo | URL, init?: RequestInit) => {
+      call += 1;
+      const msgs = (JSON.parse(String(init?.body)) as { messages: { role: string; content: string }[] }).messages;
+      if (call === 1) {
+        return new Response(JSON.stringify({ choices: [{ message: { content: markdown } }] }), { status: 200 });
+      }
+      // The retry must replay the bad reply and demand the format again.
+      expect(msgs.some((m) => m.role === "assistant" && m.content.includes("Disco Ball"))).toBe(true);
+      expect(msgs[msgs.length - 1]!.content).toContain("not the required format");
+      return new Response(JSON.stringify({ choices: [{ message: { content: asBlocks(goodCard) } }] }), { status: 200 });
+    }) as typeof fetch;
+
+    const res = await generateBatch(sayLessCards, cfg(), 1, { fetcher: stubborn, maxAttempts: 1 });
+    expect(res.accepted).toHaveLength(1);
+    expect(call).toBe(2);
+  });
+
+  it("gives up on a model that ignores the format twice — no markdown parsing", async () => {
+    const markdown = "*Secret:* Disco Ball\n*   Dance";
+    const hopeless = (async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: markdown } }] }), { status: 200 })) as typeof fetch;
+    const res = await generateBatch(sayLessCards, cfg(), 1, { fetcher: hopeless, maxAttempts: 1 });
+    expect(res.accepted).toHaveLength(0);
+    expect(res.rejected[0]!.failure.kind).toBe("no_block");
+  });
+
   it("fails clearly without an API key rather than calling anything", async () => {
     const r = await generateOne(sayLessCards, cfg({ apiKey: undefined }), { seed: 1, avoid: [] }, fakeModel([goodCard]));
     expect(r.ok).toBe(false);

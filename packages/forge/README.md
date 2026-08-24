@@ -42,6 +42,16 @@ GWW_FORGE_MODEL=<exact-id> node packages/forge/dist/cli.js say-less-cards 40
 Known writers on the network as of 2026-08-24: `muse-local:latest`,
 `muse-chat:latest`, `gemma4:26b`, `qwen3.6:27b`, plus the cloud models.
 
+**Format compliance varies by model, and it is the first thing to check.**
+`muse-local:latest` emitted correct blocks on its first ever call. `gemma4:26b`
+ignored a system-only lesson and replied in markdown bullets
+(`*Secret:* Disco Ball`), writing several cards at once — so the format
+reminder now rides on the *user* turn, and a model that still answers in prose
+is shown its own reply and asked to convert it, once. If it fails twice the
+attempt is rejected. We never parse markdown; teaching the contract is the
+only lever, because tolerating a broken contract is how the JSON repair pile
+got built.
+
 **`gemma4-extract:31b` and `muse-extract:latest` are NOT writers.** They are
 tuned to pull structure out of text you hand them — the opposite job. They will
 follow the block format perfectly and write flat cards. `models` groups them

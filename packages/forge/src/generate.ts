@@ -9,7 +9,7 @@
 
 import { createHash } from "node:crypto";
 import { extractBlocks, extractTaggedBlocks } from "sentinel-blocks";
-import { systemPrompt, type ContentSpec, type GateResult } from "./spec.js";
+import { formatReminder, systemPrompt, type ContentSpec, type GateResult } from "./spec.js";
 
 export interface ForgeConfig {
   aiasUrl: string;
@@ -123,6 +123,8 @@ export async function generateOne<T>(
   cfg: ForgeConfig,
   ctx: { seed: number; avoid: string[] },
   fetcher: typeof fetch = fetch,
+  /** A failed prior reply, replayed so the model can be corrected in-turn. */
+  correction?: { badReply: string },
 ): Promise<Attempt<T>> {
   if (cfg.apiKey === undefined || cfg.apiKey.length === 0) {
     return { ok: false, failure: { kind: "threw", detail: "AIAS_API_KEY not set" } };
@@ -136,7 +138,23 @@ export async function generateOne<T>(
         model: cfg.model,
         messages: [
           { role: "system", content: systemPrompt(spec) },
-          { role: "user", content: spec.user(ctx) },
+          // The reminder rides on the USER turn, where every model weights it.
+          { role: "user", content: `${spec.user(ctx)}\n${formatReminder(spec)}` },
+          // A model that answered in prose gets shown its own reply and told
+          // to convert it — cheaper and more honest than parsing markdown.
+          ...(correction !== undefined
+            ? [
+                { role: "assistant", content: correction.badReply.slice(0, 4000) },
+                {
+                  role: "user",
+                  content:
+                    "That was not the required format. Do not explain, do not " +
+                    "apologise, do not write markdown or bullets. Take ONE item " +
+                    "from what you just wrote and re-emit it as the sentinel " +
+                    `blocks only.\n${formatReminder(spec)}`,
+                },
+              ]
+            : []),
         ],
         temperature: cfg.temperature,
         // NO max_tokens. Capping a thinking model starves the reasoning pass
@@ -204,7 +222,15 @@ export async function generateBatch<T>(
   const rejected: BatchResult<T>["rejected"] = [];
 
   for (let attempt = 1; attempt <= maxAttempts && accepted.length < want; attempt++) {
-    const r = await generateOne(spec, cfg, { seed: baseSeed + attempt, avoid: [...avoid] }, fetcher);
+    let r = await generateOne(spec, cfg, { seed: baseSeed + attempt, avoid: [...avoid] }, fetcher);
+    // One corrective round when the model answered in prose. Teach the format,
+    // never parse around it — that road led to the JSON repair pile.
+    if (!r.ok && r.failure.kind === "no_block" && r.raw !== undefined && r.raw.length > 0) {
+      log(`  [${attempt}] no blocks — showing it its own reply and asking again`);
+      r = await generateOne(spec, cfg, { seed: baseSeed + attempt, avoid: [...avoid] }, fetcher, {
+        badReply: r.raw,
+      });
+    }
     if (!r.ok) {
       rejected.push({ attempt, failure: r.failure, ...(r.raw !== undefined ? { raw: r.raw } : {}) });
       log(`  [${attempt}] rejected: ${describe(r.failure)}`);
