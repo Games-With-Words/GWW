@@ -44,6 +44,11 @@ function publicRound(round: RoundState | undefined) {
     guesses: round.guesses.map((g) => ({ playerId: g.playerId, value: g.value, correct: g.correct })),
     winnerId: round.winnerId,
     endedReason: round.endedReason,
+    // The ANONYMIZED ballot. ballotOwners is deliberately absent — the owner
+    // map never crosses the wire until it arrives inside `reveal`.
+    ...(round.ballot !== undefined ? { ballot: round.ballot } : {}),
+    votedBy: round.votes.map((v) => ({ voterId: v.voterId, category: v.category })),
+    ...(round.reveal !== undefined ? { reveal: round.reveal } : {}),
     // The card's reveal line goes public the moment the round completes.
     ...(round.phase === "COMPLETE" ? { revealLine: round.card.revealLine } : {}),
   };
@@ -71,6 +76,7 @@ export class GameSession {
     private now: () => number = () => Date.now(),
     private clueTimeoutMs = 45_000,
     private guessTimeoutMs = 60_000,
+    private ballotTimeoutMs = 15_000,
   ) {
     const players = [...room.players.values()].map((p) => ({
       id: p.id,
@@ -91,13 +97,33 @@ export class GameSession {
     this.deadline = undefined;
   }
 
+  /**
+   * What a expiring clock means depends on WHICH phase is running.
+   *
+   * Before the rework every timeout ended the round. Now a guessing timeout
+   * opens the ballot (the round is not over — the room still votes on what
+   * came in) and a ballot timeout closes it, counting whatever arrived.
+   */
+  private onDeadline(): void {
+    const phase = this.state.round?.phase;
+    if (phase === "GUESSING") {
+      this.apply("game", (s) => sayLess.command(s, "guessing.close", {}, this.now()));
+      return;
+    }
+    if (phase === "BALLOT") {
+      this.apply("game", (s) => sayLess.command(s, "ballot.close", {}, this.now()));
+      return;
+    }
+    this.apply("game", (s) => sayLess.command(s, "round.end", { reason: "TIMEOUT" }, this.now()));
+  }
+
   private armTimer(ms: number): void {
     this.clearTimer();
     this.deadline = this.now() + ms;
     this.timer = setTimeout(() => {
       try {
         if (this.state.status === "IN_ROUND") {
-          this.apply("game", (s) => sayLess.command(s, "round.end", { reason: "TIMEOUT" }, this.now()));
+          this.onDeadline();
         }
       } catch {
         /* round already ended between fire and handling — nothing to do */
@@ -149,6 +175,9 @@ export class GameSession {
       this.callbacks.broadcast("event", e);
       if (e.type === "round.started") this.afterRoundStarted();
       if (e.type === "clue.accepted") this.armTimer(this.guessTimeoutMs);
+      // The ballot gets its own, much shorter clock — a vote is a reflex, not
+      // a deliberation, and party games die on dead time.
+      if (e.type === "ballot.opened") this.armTimer(this.ballotTimeoutMs);
       if (e.type === "round.completed" || e.type === "game.completed") this.clearTimer();
     }
     this.callbacks.broadcast("state", this.snapshot());
@@ -202,6 +231,15 @@ export class GameSession {
       case "guess.submit": {
         const value = String(payload["value"] ?? "");
         this.apply(playerId, (s) => sayLess.command(s, "guess.submit", { playerId, value }, now));
+        return;
+      }
+      case "ballot.vote": {
+        // The voter is ALWAYS the connected player — never taken from the
+        // payload, or one phone could cast another player's ballot.
+        const category = payload["category"] === "CLOSEST" ? "CLOSEST" : "FUNNIEST";
+        const slotId = String(payload["slotId"] ?? "");
+        this.apply(playerId, (s) =>
+          sayLess.command(s, "ballot.vote", { voterId: playerId, category, slotId }, now));
         return;
       }
       case "vote.resolve": {
