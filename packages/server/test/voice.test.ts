@@ -128,3 +128,32 @@ describe("VoiceService", () => {
     expect(v.audioPath("lines.json")).toBeUndefined();
   });
 });
+
+// ---- Ris's cue bank: every hosting moment has a floor and a cache lane ----
+import { CUES, L0_CUE_LINES } from "../src/voice.js";
+import { describe as cdesc, expect as cexp, it as cit } from "vitest";
+
+cdesc("cue bank", () => {
+  cit("every cue has hand-written L0 lines — captions can never go silent", () => {
+    for (const cue of CUES) cexp(L0_CUE_LINES[cue].length).toBeGreaterThan(2);
+  });
+
+  cit("pickLine falls back to L0 text for an empty cache, per cue", () => {
+    const v = new VoiceService({ ...cfg(), apiKey: undefined });
+    for (const cue of CUES) {
+      const line = v.pickLine(cue);
+      cexp(L0_CUE_LINES[cue]).toContain(line.text);
+      cexp(line.audioFile).toBeUndefined();
+    }
+  });
+
+  cit("replenish fills the thinnest cue and tags the entry", async () => {
+    const fetcher = fakeFetch("A perfectly fresh hosting line for the moment.");
+    const v = new VoiceService(cfg(), fetcher as unknown as typeof fetch);
+    const r = await v.replenishOnce();
+    cexp(r.status).toBe("ok");
+    cexp(CUES).toContain(r.cue!);
+    const line = v.pickLine(r.cue!);
+    cexp(line.audioFile).toBeDefined();
+  });
+});

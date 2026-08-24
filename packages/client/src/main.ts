@@ -90,7 +90,7 @@ function connect(rid: string, token: string, board: boolean): void {
         room = reduce(room, msg);
         if (msg.type === "event") {
           const ev = msg["data"] as { type?: string; [k: string]: unknown } | undefined;
-          if (ev?.type === "game.started") void playIntroOnBoard();
+          if (ev?.type !== undefined) void risHosts(ev);
           if (room.isBoard && ev?.type !== undefined) boardCinema(before, room, ev);
         }
         if (msg.type === "error") setTimeout(() => { if (room?.error !== undefined) { room = { ...room, error: undefined }; render(); } }, 4000);
@@ -160,22 +160,45 @@ function boardTick(): void {
   }
 }
 
-/** The board speaks Ris's intro when the game starts. Fire-and-forget:
- *  audio failure just leaves the caption — the party never waits (spec §07). */
-let introPlayed = false;
-async function playIntroOnBoard(): Promise<void> {
-  if (introPlayed || room?.isBoard !== true) return;
-  introPlayed = true;
+/** Ris hosts the whole night from the board — she calls the round, lands the
+ *  clue, stings the timeout, celebrates the win, signs off. Cached lines only;
+ *  audio failure leaves the caption — the party never waits (spec §07). */
+const CUE_FOR_EVENT: Record<string, string> = {
+  "game.started": "intro",
+  "round.started": "round",
+  "clue.accepted": "clue",
+  "game.completed": "outro",
+};
+
+let risAudio: HTMLAudioElement | undefined;
+let introSpoken = false;
+
+async function risHosts(ev: { type?: string; [k: string]: unknown }): Promise<void> {
+  if (room?.isBoard !== true || ev.type === undefined) return;
+  let cue = CUE_FOR_EVENT[ev.type];
+  if (ev.type === "round.completed") {
+    const reason = String(ev["reason"] ?? "");
+    if (reason === "TIMEOUT") cue = "timeout";
+    else if (reason === "CORRECT") cue = "correct";
+  }
+  if (cue === undefined) return;
+  if (cue === "intro") {
+    if (introSpoken) return;
+    introSpoken = true;
+  }
   try {
-    const res = await fetch("/api/voice/intro");
-    const intro = (await res.json()) as { text: string; audioUrl: string | null };
-    if (room !== undefined) {
-      room = { ...room, caption: intro.text };
+    const res = await fetch(`/api/voice/cue/${cue}`);
+    const line = (await res.json()) as { text: string; audioUrl: string | null };
+    // The intro caption is Ris's own line; other beats keep the event caption
+    // (it carries specifics like the actual clue) — she voices over it.
+    if (cue === "intro" && room !== undefined) {
+      room = { ...room, caption: line.text };
       render();
     }
-    if (intro.audioUrl !== null) {
-      const audio = new Audio(intro.audioUrl);
-      audio.play().catch(() => undefined);
+    if (line.audioUrl !== null) {
+      risAudio?.pause();
+      risAudio = new Audio(line.audioUrl);
+      risAudio.play().catch(() => undefined);
     }
   } catch {
     /* caption fallback already rendered from the event stream */

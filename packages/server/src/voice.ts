@@ -16,6 +16,17 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+/** The moments Ris hosts. Every cue has L0 text, cached audio, and a muse brief. */
+export type Cue =
+  | "intro"
+  | "round"
+  | "clue"
+  | "timeout"
+  | "correct"
+  | "outro";
+
+export const CUES: Cue[] = ["intro", "round", "clue", "timeout", "correct", "outro"];
+
 /** L0 — hand-written Ris intro lines. The floor the pipeline can never sink below. */
 export const L0_INTRO_LINES: string[] = [
   "Welcome to the room! No strangers, no awkward accounts — just your circle and some very questionable clues.",
@@ -28,12 +39,58 @@ export const L0_INTRO_LINES: string[] = [
   "New game, clean slate. Old grudges from last round are, of course, still admissible.",
 ];
 
+/** L0 lines for every other cue — Ris guides the whole night, never just the open. */
+export const L0_CUE_LINES: Record<Cue, string[]> = {
+  intro: L0_INTRO_LINES,
+  round: [
+    "New round! Speaker, your secret just landed. Everyone else, look alive.",
+    "Fresh card, fresh chances. Speaker, choose your words like they cost money — they do.",
+    "Round's up! Remember: fewer words, more glory.",
+    "Here we go. Speaker, the room believes in you. The room is also ready to laugh at you.",
+    "Next round! Somebody in here is about to be a legend or a cautionary tale.",
+  ],
+  clue: [
+    "The clue is in! Guessers, go go go!",
+    "That's the clue. Phones up — first correct answer takes it.",
+    "Clue's on the board. Trust your gut, it's funnier when you're wrong anyway.",
+    "And the clue lands. Guess fast, think later.",
+  ],
+  timeout: [
+    "Time! Nobody got it. That silence? That's the sound of friendship being tested.",
+    "Buzzer! No winners this round — the word remains undefeated.",
+    "And... time. The secret walks free. Awkward.",
+  ],
+  correct: [
+    "YES! That's it! Points on the board!",
+    "Got it! Somebody actually knows their friends.",
+    "Correct! The room erupts. Well — it should.",
+    "Nailed it! That's how it's done, people.",
+  ],
+  outro: [
+    "That's the game! Argue about the scoring on your own time — I'm off the clock.",
+    "And scene! Tonight's best rounds are tomorrow's inside jokes.",
+    "Game over! The scoreboard is final. The rematch demands are inevitable.",
+  ],
+};
+
+/** What muse is asked to write, per cue. One line, speakable, under 25 words. */
+const CUE_BRIEFS: Record<Cue, string> = {
+  intro: "Write EXACTLY ONE fresh opening line to welcome the room and kick off a game of Say Less.",
+  round: "Write EXACTLY ONE fresh line announcing a new round is starting: the Speaker just got a secret word, everyone else should get ready to guess.",
+  clue: "Write EXACTLY ONE fresh line announcing the Speaker's clue just landed and the guessers should start guessing fast.",
+  timeout: "Write EXACTLY ONE fresh line for the moment time runs out and NOBODY guessed the word — playful sting, roast the moment never a person.",
+  correct: "Write EXACTLY ONE fresh celebratory line for the moment someone guesses the secret word correctly.",
+  outro: "Write EXACTLY ONE fresh sign-off line for the end of the game — send the room off laughing.",
+};
+
 interface VoiceEntry {
   hash: string;
   text: string;
   file: string;
   createdAt: number;
   source: "muse" | "seed";
+  /** Which hosting moment this line serves. Legacy entries default to intro. */
+  cue?: Cue;
 }
 
 interface Manifest {
@@ -62,10 +119,9 @@ export function voiceConfigFromEnv(): VoiceConfig {
   };
 }
 
-const LINE_SYSTEM_PROMPT =
+const lineSystemPrompt = (cue: Cue): string =>
   "You are Ris, the host of Games With Words — a private, in-person party game " +
-  "played by friends and family in one room. Write EXACTLY ONE fresh opening line " +
-  "to welcome the room and kick off a game of Say Less. Rules: under 25 words; " +
+  "played by friends and family in one room. " + CUE_BRIEFS[cue] + " Rules: under 25 words; " +
   "warm, funny, a little mischievous; roast the MOMENT never a person; no emojis; " +
   "no quotation marks; no stage directions; plain speakable text only. " +
   "Randomize your angle every time — never repeat a structure you have used before.";
@@ -119,20 +175,34 @@ export class VoiceService {
   }
 
   /**
-   * Pick an intro for a starting game. Cached voiced lines win; otherwise a
+   * Pick a line for a hosting moment. Cached voiced lines win; otherwise a
    * hand-written L0 line, caption-only. NEVER waits on generation.
    */
-  pickIntro(): { text: string; audioFile: string | undefined } {
-    const voiced = this.manifest.entries;
+  pickLine(cue: Cue): { text: string; audioFile: string | undefined } {
+    const voiced = this.manifest.entries.filter((e) => (e.cue ?? "intro") === cue);
     if (voiced.length > 0) {
       const e = voiced[Math.floor(Math.random() * voiced.length)]!;
       const path = join(this.cfg.cacheDir, e.file);
       if (existsSync(path)) return { text: e.text, audioFile: e.file };
     }
-    return {
-      text: L0_INTRO_LINES[Math.floor(Math.random() * L0_INTRO_LINES.length)]!,
-      audioFile: undefined,
-    };
+    const l0 = L0_CUE_LINES[cue];
+    return { text: l0[Math.floor(Math.random() * l0.length)]!, audioFile: undefined };
+  }
+
+  /** Back-compat alias — the intro is just the first cue Ris ever had. */
+  pickIntro(): { text: string; audioFile: string | undefined } {
+    return this.pickLine("intro");
+  }
+
+  /** The cue with the thinnest cache gets the next render. */
+  private neediestCue(): Cue {
+    let best: Cue = "intro";
+    let bestCount = Infinity;
+    for (const c of CUES) {
+      const n = this.manifest.entries.filter((e) => (e.cue ?? "intro") === c).length;
+      if (n < bestCount) { best = c; bestCount = n; }
+    }
+    return best;
   }
 
   audioPath(file: string): string | undefined {
@@ -142,10 +212,12 @@ export class VoiceService {
     return existsSync(p) ? p : undefined;
   }
 
-  /** One replenishment attempt: muse writes a line, Chatterbox voices it. */
-  async replenishOnce(): Promise<{ status: string; text?: string }> {
+  /** One replenishment attempt: muse writes a line, Chatterbox voices it.
+   *  Fills the cue with the thinnest cache so Ris learns her whole script. */
+  async replenishOnce(cueOverride?: Cue): Promise<{ status: string; text?: string; cue?: Cue }> {
     if (!this.enabled) return { status: "disabled" };
     if (this.generatedToday() >= this.cfg.dailyMax) return { status: "budget_exhausted" };
+    const cue = cueOverride ?? this.neediestCue();
 
     // 1. muse-local writes the line (through PIN, server-to-server).
     const chatRes = await this.fetcher(`${this.cfg.aiasUrl}/api/v1/pin/chat/completions`, {
@@ -157,20 +229,20 @@ export class VoiceService {
       body: JSON.stringify({
         model: this.cfg.lineModel,
         messages: [
-          { role: "system", content: LINE_SYSTEM_PROMPT },
+          { role: "system", content: lineSystemPrompt(cue) },
           { role: "user", content: `Write tonight's opening line. Random seed: ${Math.floor(this.now() / 1000)}.` },
         ],
         temperature: 1.0,
         max_tokens: 80,
       }),
     });
-    if (!chatRes.ok) return { status: `line_failed_${chatRes.status}` };
+    if (!chatRes.ok) return { status: `line_failed_${chatRes.status}`, cue };
     const chat = (await chatRes.json()) as { choices?: { message?: { content?: string } }[] };
     const line = validateLine(chat.choices?.[0]?.message?.content ?? "");
-    if (line === undefined) return { status: "line_rejected" };
+    if (line === undefined) return { status: "line_rejected", cue };
 
     const hash = createHash("sha256").update(line).digest("hex").slice(0, 16);
-    if (this.manifest.entries.some((e) => e.hash === hash)) return { status: "duplicate" };
+    if (this.manifest.entries.some((e) => e.hash === hash)) return { status: "duplicate", cue };
 
     // 2. Chatterbox voices it (through PIN).
     const ttsRes = await this.fetcher(`${this.cfg.aiasUrl}/api/v1/pin/audio/speech`, {
@@ -186,16 +258,27 @@ export class VoiceService {
         response_format: "wav",
       }),
     });
-    if (!ttsRes.ok) return { status: `tts_failed_${ttsRes.status}` };
+    if (!ttsRes.ok) return { status: `tts_failed_${ttsRes.status}`, cue };
     const audio = Buffer.from(await ttsRes.arrayBuffer());
-    if (audio.length < 100) return { status: "tts_empty" };
+    if (audio.length < 100) return { status: "tts_empty", cue };
 
     const file = `${hash}.wav`;
     writeFileSync(join(this.cfg.cacheDir, file), audio);
-    this.manifest.entries.push({ hash, text: line, file, createdAt: this.now(), source: "muse" });
+    this.manifest.entries.push({ hash, text: line, file, createdAt: this.now(), source: "muse", cue });
     this.save();
-    console.log(`[voice] new Ris intro cached (${audio.length} bytes): "${line}"`);
-    return { status: "ok", text: line };
+    console.log(`[voice] new Ris ${cue} line cached (${audio.length} bytes): "${line}"`);
+    return { status: "ok", text: line, cue };
+  }
+
+  /** Drip wrapper: EVERY outcome hits the log — a silent failure cost us a
+   *  night of "why is audioUrl null". Never again. */
+  private async replenishLogged(): Promise<void> {
+    try {
+      const r = await this.replenishOnce();
+      if (r.status !== "ok") console.log(`[voice] replenish: ${r.status}${r.cue !== undefined ? ` (cue: ${r.cue})` : ""}`);
+    } catch (err) {
+      console.log(`[voice] replenish threw: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /** Background drip: spaced so the daily budget is spread across the day. */
@@ -207,8 +290,8 @@ export class VoiceService {
     const intervalMs = Math.max(1, Math.floor((24 * 60 * 60 * 1000) / Math.max(1, this.cfg.dailyMax)));
     console.log(`[voice] pipeline on: max ${this.cfg.dailyMax}/day, one attempt every ${Math.round(intervalMs / 60000)}m`);
     // First attempt shortly after boot, then the drip.
-    setTimeout(() => void this.replenishOnce().catch(() => undefined), 15_000).unref?.();
-    this.timer = setInterval(() => void this.replenishOnce().catch(() => undefined), intervalMs);
+    setTimeout(() => void this.replenishLogged(), 15_000).unref?.();
+    this.timer = setInterval(() => void this.replenishLogged(), intervalMs);
     this.timer.unref?.();
   }
 
