@@ -130,13 +130,18 @@ export function reduce(s: RoomState, msg: { type: string; [k: string]: unknown }
     }
     case "state": {
       const game = data as unknown as PublicGameState;
-      // Entering a new round clears the previous round's secret and reveal.
-      const changedRound = game.round?.index !== s.game?.round?.index;
+      // Keep the secret exactly while it belongs to the CURRENT round.
+      // Key on the secret's own roundIndex — comparing previous game state
+      // wiped a just-received secret on the FIRST state after game start
+      // (round 0 vs undefined read as "round changed"), leaving the Speaker
+      // staring at "Fetching your secret…" forever. Found in live play.
+      const secretStillCurrent =
+        s.secret !== undefined && game.round !== undefined && s.secret.roundIndex === game.round.index;
       return {
         ...s,
         game,
         stateReceivedAt: Date.now(),
-        secret: changedRound ? undefined : s.secret,
+        secret: secretStillCurrent ? s.secret : undefined,
         flagged: game.round?.phase === "VOTING" ? s.flagged : undefined,
       };
     }

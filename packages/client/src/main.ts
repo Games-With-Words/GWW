@@ -195,6 +195,15 @@ function esc(s: string): string {
 }
 
 function render(): void {
+  // A re-render must NEVER eat what the player is typing. Capture the focused
+  // input before rebuilding the DOM, restore it after — found in live play:
+  // every incoming message (and the old 1s ticker) blurred the clue box and
+  // wiped half-typed text. Party games live and die on the keyboard.
+  const active = document.activeElement as HTMLInputElement | null;
+  const keepId = active !== null && active.tagName === "INPUT" ? active.id : undefined;
+  const keepValue = keepId !== undefined ? active!.value : "";
+  const keepPos = keepId !== undefined ? active!.selectionStart ?? keepValue.length : 0;
+
   app.replaceChildren();
   const boardMode = room?.isBoard === true && screen.kind === "room";
   app.classList.toggle("board", boardMode);
@@ -210,14 +219,39 @@ function render(): void {
     case "room": renderRoom(); break;
   }
   app.append(el(`<footer>Games With Words · Interchained LLC Labs · <span class="dim">the room is the game</span> · <a href="https://github.com/Games-With-Words/GWW" target="_blank" rel="noopener noreferrer">GPLv3</a> · <span class="dim">build ${__BUILD__}</span></footer>`));
+
+  if (keepId !== undefined) {
+    const revived = document.getElementById(keepId) as HTMLInputElement | null;
+    if (revived !== null) {
+      revived.value = keepValue;
+      revived.focus({ preventScroll: true });
+      try { revived.setSelectionRange(keepPos, keepPos); } catch { /* number inputs etc. */ }
+    }
+  }
   syncTicker();
 }
 
-/** Re-render once a second while a phase clock is running. */
+/** Update ONLY the clock text each second — a full render would blur the
+ *  player's input mid-word. The DOM rebuild happens on real state changes. */
+function tickClock(): void {
+  if (room === undefined) return;
+  const ms = msLeft(room, Date.now());
+  const node = document.querySelector(".clock");
+  if (node !== null && ms !== undefined) {
+    const secs = Math.ceil(ms / 1000);
+    node.textContent = `${secs}s`;
+    node.classList.toggle("urgent", secs <= 10);
+    document.body.classList.toggle(
+      "tension",
+      room.isBoard && room.game?.status === "IN_ROUND" && ms <= 10_000,
+    );
+  }
+}
+
 function syncTicker(): void {
   const running = room?.game?.deadline !== undefined && room.game.status === "IN_ROUND";
   if (running && ticker === undefined) {
-    ticker = setInterval(() => { if (screen.kind === "room") { boardTick(); render(); } }, 1000);
+    ticker = setInterval(() => { if (screen.kind === "room") { boardTick(); tickClock(); } }, 1000);
   } else if (!running && ticker !== undefined) {
     clearInterval(ticker);
     ticker = undefined;
