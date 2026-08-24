@@ -50,3 +50,56 @@ describe("mobile invariants", () => {
     expect(html).toContain("width=device-width");
   });
 });
+
+// ---- Ris's voice: the silent failure that cost us a live game -------------
+describe("audio playback never fails silently", () => {
+  const src = readFileSync(join(import.meta.dirname, "../src/main.ts"), "utf8");
+
+  it("does NOT swallow a blocked play()", () => {
+    // The original was `.play().catch(() => undefined)` — cached WAVs, a
+    // working API, no sound, and nothing anywhere saying why.
+    expect(src).not.toContain("play().catch(() => undefined)");
+    expect(src).toMatch(/console\.warn\(`\[ris\] playback blocked/);
+  });
+
+  it("primes ONE audio element on a real user gesture", () => {
+    // A fresh `new Audio()` per line is subject to autoplay policy every time.
+    expect(src).toContain("const risAudio = new Audio()");
+    expect(src).toContain('addEventListener("pointerdown", unlockAudio');
+    expect(src).toContain('addEventListener("keydown", unlockAudio');
+  });
+
+  it("tells the room when the browser is refusing, instead of just being quiet", () => {
+    expect(src).toContain("Ris can't speak");
+    expect(src).toMatch(/function audioNotice/);
+  });
+});
+
+// ---- Ris's voice: the silent failure that killed a live game -------------
+describe("audio never fails silently", () => {
+  const src = readFileSync(join(import.meta.dirname, "../src/main.ts"), "utf8");
+
+  it("does NOT swallow a blocked play()", () => {
+    // Was `.play().catch(() => undefined)`: cached WAVs, healthy API, no sound,
+    // and nothing anywhere saying why.
+    expect(src).not.toContain("play().catch(() => undefined)");
+    expect(src).toMatch(/console\.warn\(`\[ris\] playback blocked/);
+  });
+
+  it("primes ONE element with a REAL sound — an empty src throws, it does not unlock", () => {
+    expect(src).toContain("const risAudio = new Audio()");
+    expect(src).toContain("SILENT_WAV");
+    expect(src).toContain("risAudio.src = SILENT_WAV");
+  });
+
+  it("gives the board its own start button, because nothing else ever taps it", () => {
+    // The board is built to be untouched, so it never earns audio permission.
+    // A scripted click cannot substitute: browsers require a trusted event.
+    expect(src).toContain("Tap to start the show");
+    expect(src).toMatch(/unlockAudio\(\);[\s\S]{0,120}socket\?\.send\(\{ type: "game\.start" \}\)/);
+  });
+
+  it("says so on screen when the browser is still refusing", () => {
+    expect(src).toContain("Ris can't speak");
+  });
+});

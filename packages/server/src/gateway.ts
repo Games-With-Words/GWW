@@ -60,6 +60,28 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
   const sockets = new Map<string, Map<string, Set<WebSocket>>>();
   // room.id -> board sockets (desktop/TV displays — never players, never secrets)
   const boards = new Map<string, Set<WebSocket>>();
+
+  /**
+   * Create the session and open round 1. Shared by the phone path and the
+   * board's one allowed command, so "start" means exactly the same thing
+   * however the room chose to begin.
+   */
+  function startSession(room: Room, seed: number): void {
+    const s = new GameSession(
+      room,
+      seed,
+      log,
+      {
+        broadcast: (type, payload) => broadcast(room.id, type, payload),
+        toPlayer: (pid, type, payload) => toPlayer(room.id, pid, type, payload),
+      },
+      now,
+    );
+    sessions.set(room.id, s);
+    presence(room);
+    // Round 1 begins the moment the game starts — no second tap needed.
+    s.command("game", true, "round.start", {});
+  }
   const joinAttempts = new Map<string, JoinAttemptWindow>();
 
   const arcade: Arcade = createArcade();
@@ -317,8 +339,43 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
         data: { board: true, roomState: room.state, gameId: room.gameId, shortCode: room.shortCode, snapshot: session?.snapshot() },
       });
       presence(room);
-      ws.on("message", () => {
-        send(ws, "error", { error: "BOARD_READONLY", message: "The board watches. Phones play." });
+      /**
+       * The board is read-only with ONE narrow exception: it may start the show.
+       *
+       * Why the exception exists: the board is designed never to be touched, so
+       * its browser never receives a user gesture, so it never earns audio
+       * permission — and Ris, who only speaks from the board, is silent forever.
+       * Cached WAVs, healthy API, dead room. A scripted click cannot fix it;
+       * browsers require a TRUSTED event.
+       *
+       * So the host taps the board to begin, and that one real gesture both
+       * unlocks the voice and starts the game. The read-only rule still holds
+       * where it matters: the board is never a player and never sees a secret.
+       */
+      ws.on("message", (raw) => {
+        let msg: Record<string, unknown> = {};
+        try {
+          msg = JSON.parse(String(raw)) as Record<string, unknown>;
+        } catch {
+          send(ws, "error", { error: "BAD_JSON", message: "Messages must be JSON." });
+          return;
+        }
+        if (msg["type"] !== "game.start") {
+          send(ws, "error", { error: "BOARD_READONLY", message: "The board watches. Phones play." });
+          return;
+        }
+        try {
+          if (sessions.has(room.id)) throw new SessionError("ALREADY_STARTED", "Game already started.");
+          if (room.players.size < 2) throw new SessionError("TOO_FEW_PLAYERS", "Need at least 2 players.");
+          const seed = typeof msg["seed"] === "number" ? (msg["seed"] as number) : Math.floor(Math.random() * 2 ** 31);
+          const chosen = rooms.assignRandomHost(room);
+          glog("game", `${room.shortCode} STARTED FROM THE BOARD — random host: "${chosen?.displayName ?? "?"}", seed=${seed}, ${room.players.size} players`);
+          room.state = "PLAYING";
+          startSession(room, seed);
+        } catch (err) {
+          const e = err as { code?: string; message?: string };
+          send(ws, "error", { error: e.code ?? "ERROR", message: e.message ?? "Could not start." });
+        }
       });
       ws.on("close", () => { set.delete(ws); glog("ws", `${room.shortCode} board disconnected`); });
       return;
@@ -375,20 +432,7 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
           const chosen = rooms.assignRandomHost(room);
           glog("game", `${room.shortCode} STARTED by "${player.displayName}" — random host: "${chosen?.displayName ?? "?"}", seed=${seed}, ${room.players.size} players`);
           room.state = "PLAYING";
-          const s = new GameSession(
-            room,
-            seed,
-            log,
-            {
-              broadcast: (type, payload) => broadcast(room.id, type, payload),
-              toPlayer: (pid, type, payload) => toPlayer(room.id, pid, type, payload),
-            },
-            now,
-          );
-          sessions.set(room.id, s);
-          presence(room);
-          // Round 1 begins the moment the game starts — no second tap needed.
-          s.command("game", true, "round.start", {});
+          startSession(room, seed);
           return;
         }
 

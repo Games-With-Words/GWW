@@ -178,10 +178,54 @@ const CUE_FOR_EVENT: Record<string, string> = {
   "round.started": "round",
   "clue.accepted": "clue",
   "game.completed": "outro",
+  // The ballot and reveal have captions but no cue bank yet — once
+  // `ris-lines-vote` and `ris-lines-reveal` are forged, they slot in here.
 };
 
-let risAudio: HTMLAudioElement | undefined;
+/**
+ * ONE audio element for the whole session, unlocked by the first user gesture.
+ *
+ * Browsers refuse audio.play() until the page has been interacted with. The
+ * old code created a fresh `new Audio(url)` per line and swallowed the
+ * rejection with `.catch(() => undefined)` — so on a board nobody had clicked,
+ * Ris was silent and NOTHING said why. Cached WAVs, working API, no sound, no
+ * clue. Exactly the silent-failure pattern that cost us a night already.
+ *
+ * A single element primed inside a real gesture stays playable for the rest of
+ * the session, and a blocked play now reports itself.
+ */
+const risAudio = new Audio();
+let audioUnlocked = false;
+let audioBlocked = false;
 let introSpoken = false;
+
+/**
+ * A tiny valid silent WAV. Priming with an EMPTY src throws instead of
+ * unlocking, which is why the first attempt at this silently did nothing —
+ * the element must actually play something real inside the gesture.
+ */
+const SILENT_WAV =
+  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQAAAAA=";
+
+/** Prime the audio element INSIDE a user gesture so later plays are allowed. */
+function unlockAudio(): void {
+  if (audioUnlocked) return;
+  audioUnlocked = true;
+  risAudio.src = SILENT_WAV;
+  risAudio.play().then(() => {
+    risAudio.pause();
+    risAudio.currentTime = 0;
+    audioBlocked = false;
+  }).catch((err: unknown) => {
+    // Still blocked after a real gesture — say so rather than going quiet.
+    audioUnlocked = false;
+    console.warn("[ris] audio still locked after gesture:", err);
+  });
+}
+// Any interaction anywhere counts: creating the room, starting the game, a tap
+// on the board. The board's own "Say Less" click is usually the one.
+document.addEventListener("pointerdown", unlockAudio, { once: false });
+document.addEventListener("keydown", unlockAudio, { once: false });
 
 async function risHosts(ev: { type?: string; [k: string]: unknown }): Promise<void> {
   if (room?.isBoard !== true || ev.type === undefined) return;
@@ -206,12 +250,21 @@ async function risHosts(ev: { type?: string; [k: string]: unknown }): Promise<vo
       render();
     }
     if (line.audioUrl !== null) {
-      risAudio?.pause();
-      risAudio = new Audio(line.audioUrl);
-      risAudio.play().catch(() => undefined);
+      risAudio.pause();
+      risAudio.src = line.audioUrl;
+      risAudio.currentTime = 0;
+      try {
+        await risAudio.play();
+        if (audioBlocked) { audioBlocked = false; render(); }
+      } catch (err) {
+        // NEVER swallow this. A blocked autoplay is indistinguishable from a
+        // broken pipeline unless it says so.
+        console.warn(`[ris] playback blocked for cue "${cue}":`, err);
+        if (!audioBlocked) { audioBlocked = true; render(); }
+      }
     }
-  } catch {
-    /* caption fallback already rendered from the event stream */
+  } catch (err) {
+    console.warn(`[ris] cue "${cue}" failed:`, err);
   }
 }
 
@@ -423,7 +476,31 @@ function renderBoardLobby(s: RoomState): void {
     void QRCode.toCanvas(card.querySelector("#qr") as HTMLCanvasElement, url, { width: 260, margin: 1 });
   }
   app.append(playerList(s));
-  app.append(el(`<p class="dim" style="text-align:center">${s.players.length < 2 ? "Now seating — scan to take your seat. Nobody plays on this screen." : "House is full enough. Any phone can hit Start."}</p>`));
+
+  /**
+   * THE BOARD'S OWN START BUTTON — and it exists for a reason beyond taste.
+   *
+   * The board is designed never to be touched ("nobody plays on this screen"),
+   * so its browser never receives a user gesture, so it NEVER gets audio
+   * permission, so Ris is silent on the one device that is supposed to speak.
+   * Cached WAVs, working API, dead room.
+   *
+   * A synthetic .click() cannot fix this: autoplay permission requires a
+   * trusted event, and scripted clicks are excluded by design. The host has to
+   * really tap. So make that tap worth something — it unlocks the voice AND
+   * starts the game, one gesture, no extra ceremony.
+   */
+  if (s.players.length >= 2) {
+    const go = el(`<button class="go" id="boardstart">🔊 Tap to start the show</button>`);
+    go.addEventListener("click", () => {
+      unlockAudio();              // inside the trusted gesture — the whole point
+      socket?.send({ type: "game.start" });
+    });
+    app.append(go);
+    app.append(el(`<p class="dim small" style="text-align:center">Tap here so Ris can speak — or start from any phone and she'll stay quiet.</p>`));
+  } else {
+    app.append(el(`<p class="dim" style="text-align:center">Now seating — scan to take your seat. Nobody plays on this screen.</p>`));
+  }
 }
 
 /**
@@ -540,12 +617,26 @@ function guessFeed(s: RoomState): HTMLElement | undefined {
     .join("")}</ul></div>`);
 }
 
+/** Loud, tappable notice when the browser is refusing to let Ris speak. */
+function audioNotice(s: RoomState): HTMLElement | undefined {
+  if (!s.isBoard || !audioBlocked) return undefined;
+  const el2 = el(`<div class="error" style="cursor:pointer">🔇 Ris can't speak — tap anywhere to enable sound</div>`);
+  el2.addEventListener("click", () => {
+    audioUnlocked = false;
+    unlockAudio();
+    risAudio.play().then(() => { audioBlocked = false; render(); }).catch(() => undefined);
+  });
+  return el2;
+}
+
 function renderBoardGame(s: RoomState): void {
   const g = s.game!;
   const round = g.round;
   const clock = countdown(s);
   app.append(el(`<div class="row"><span class="brand">Say Less</span><span class="grow"></span><span class="dim">Round ${g.roundIndex + 1}</span></div>`));
   if (clock !== undefined) app.append(clock);
+  const notice = audioNotice(s);
+  if (notice !== undefined) app.append(notice);
   const cap = caption(s);
   if (cap !== undefined) app.append(cap);
 

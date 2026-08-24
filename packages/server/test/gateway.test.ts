@@ -346,18 +346,41 @@ describe("realtime round", () => {
     expect(err2.error).toBe("HOST_ONLY");
   });
 
-  it("a lone phone cannot start; the board cannot send at all", async () => {
+  it("a lone phone cannot start, and neither can a lone board", async () => {
     const created = await api("/api/rooms", {});
     const p1 = await api(`/api/rooms/${created.json.shortCode}/join`, { displayName: "Solo" });
     const solo = await connect(created.json.roomId, p1.json.playerToken);
     solo.send({ type: "game.start" });
-    const err = await solo.next("error");
-    expect(err.error).toBe("TOO_FEW_PLAYERS");
+    expect((await solo.next("error")).error).toBe("TOO_FEW_PLAYERS");
 
+    // The board may now START the show — same player-count rule applies.
     const board = await connectBoard(created.json.roomId, created.json.boardToken);
     board.send({ type: "game.start" });
-    const err2 = await board.next("error");
-    expect(err2.error).toBe("BOARD_READONLY");
+    expect((await board.next("error")).error).toBe("TOO_FEW_PLAYERS");
+  });
+
+  it("the board may START the show but still cannot play", async () => {
+    // The board is built to be untouched, so its browser never gets a user
+    // gesture and never earns audio permission — and Ris only speaks from the
+    // board. One real tap has to be possible, or she is silent by design.
+    // Everything else stays read-only: never a player, never a secret.
+    const created = await api("/api/rooms", {});
+    for (const n of ["Mark", "Ris", "Sonia"]) {
+      await api(`/api/rooms/${created.json.shortCode}/join`, { displayName: n });
+    }
+    const board = await connectBoard(created.json.roomId, created.json.boardToken);
+
+    // Any OTHER message is still refused.
+    board.send({ type: "command", name: "guess.submit", payload: { value: "let me play" } });
+    expect((await board.next("error")).error).toBe("BOARD_READONLY");
+
+    // But starting works, and the board never receives a secret for it.
+    board.send({ type: "game.start", seed: 42 });
+    await board.next("state");
+    await wait(60);
+    expect(board.sawType("secret")).toBe(false);
+    const st = board.messages.filter((m) => m.type === "state").at(-1)!;
+    expect(st.data.status).toBe("IN_ROUND");
   });
 
   it("reconnecting speaker gets the secret again; reconnecting guesser does not", async () => {
