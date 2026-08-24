@@ -11,6 +11,7 @@
 import { sayLess } from "@gww/say-less";
 import type { EngineEvent, RoundState, SessionState } from "@gww/say-less";
 import type { EventLog } from "./log.js";
+import { glog } from "./logger.js";
 import type { Room } from "./rooms.js";
 
 export interface SessionCallbacks {
@@ -106,9 +107,44 @@ export class GameSession {
     if (typeof this.timer.unref === "function") this.timer.unref();
   }
 
+  private name(playerId: string | undefined): string {
+    if (playerId === undefined) return "?";
+    return this.room.players.get(playerId)?.displayName ?? playerId;
+  }
+
+  /** One narration line per engine event. The secret stays dark until reveal. */
+  private narrate(e: EngineEvent): void {
+    const code = this.room.shortCode;
+    switch (e.type) {
+      case "game.started":
+        glog("game", `${code} game.started (${e.playerIds.length} players)`); return;
+      case "round.started":
+        glog("game", `${code} R${e.roundIndex + 1} started — speaker "${this.name(e.speakerId)}", card ${e.cardId}, ${e.budget}-word budget (secret withheld from log until reveal)`); return;
+      case "clue.submitted":
+        glog("game", `${code} R${e.roundIndex + 1} clue submitted by "${this.name(e.speakerId)}": "${e.clue}"`); return;
+      case "clue.accepted":
+        glog("game", `${code} R${e.roundIndex + 1} clue ACCEPTED (${e.wordCount} words) — guessing open`); return;
+      case "clue.rejected":
+        glog("game", `${code} R${e.roundIndex + 1} clue REJECTED (${e.reason}): ${e.detail}`); return;
+      case "clue.flagged":
+        glog("game", `${code} R${e.roundIndex + 1} clue FLAGGED — loophole vote: ${e.reason}`); return;
+      case "guess.submitted":
+        glog("game", `${code} R${e.roundIndex + 1} guess by "${this.name(e.playerId)}": "${e.value}"`); return;
+      case "guess.accepted":
+        glog("game", `${code} R${e.roundIndex + 1} CORRECT — "${this.name(e.playerId)}" got it!`); return;
+      case "round.completed":
+        glog("game", `${code} R${e.roundIndex + 1} complete (${e.reason}) — the secret was "${e.secret}"${e.winnerId !== undefined ? `, winner "${this.name(e.winnerId)}"` : ""}`); return;
+      case "score.updated":
+        glog("game", `${code} scores: ${Object.entries(e.totals).map(([id, v]) => `${this.name(id)}=${v}`).join(" ")}`); return;
+      case "game.completed":
+        glog("game", `${code} GAME COMPLETE — final: ${Object.entries(e.totals).map(([id, v]) => `${this.name(id)}=${v}`).join(" ")}`); return;
+    }
+  }
+
   /** Append engine events to the log and broadcast them (public payloads only). */
   private record(actorId: string, events: EngineEvent[]): void {
     for (const e of events) {
+      this.narrate(e);
       this.log.append(this.room.id, actorId, e.type, e, this.now());
       this.callbacks.broadcast("event", e);
       if (e.type === "round.started") this.afterRoundStarted();
