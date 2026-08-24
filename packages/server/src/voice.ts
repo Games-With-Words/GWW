@@ -237,12 +237,23 @@ export class VoiceService {
           { role: "user", content: `Write tonight's opening line. Random seed: ${Math.floor(this.now() / 1000)}.` },
         ],
         temperature: 1.0,
-        max_tokens: 80,
+        // Thinking models spend tokens reasoning BEFORE the answer — 80 was
+        // fully consumed by the preamble and content came back empty (seen
+        // live: "rejected muse output (0 chars)"). Give the line room.
+        max_tokens: 500,
       }),
     });
     if (!chatRes.ok) return { status: `line_failed_${chatRes.status}`, cue };
-    const chat = (await chatRes.json()) as { choices?: { message?: { content?: string } }[] };
-    const raw = chat.choices?.[0]?.message?.content ?? "";
+    const chat = (await chatRes.json()) as {
+      choices?: { message?: { content?: string; reasoning_content?: string }; text?: string }[];
+    };
+    const msg = chat.choices?.[0];
+    // Some model servers put the answer in nonstandard fields — take any of them.
+    const raw = msg?.message?.content ?? msg?.text ?? msg?.message?.reasoning_content ?? "";
+    if (raw.length === 0) {
+      // Show the SHAPE of what came back so the next log line names the culprit.
+      console.log(`[voice] empty muse response, body: ${JSON.stringify(chat).slice(0, 400)}`);
+    }
     const line = validateLine(raw);
     if (line === undefined) {
       // Show WHAT was rejected — a bare "line_rejected" cost us a debugging loop.
