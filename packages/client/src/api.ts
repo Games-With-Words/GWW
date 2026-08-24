@@ -4,8 +4,8 @@ export interface CreatedRoom {
   roomId: string;
   shortCode: string;
   joinToken: string;
-  hostToken: string;
-  playerId: string;
+  /** Display-board credential — the creating device watches, phones play. */
+  boardToken: string;
   gameId: string;
 }
 
@@ -43,8 +43,8 @@ export const api = {
     const json = (await res.json()) as { games: GameTile[] };
     return json.games;
   },
-  createRoom: (displayName: string, gameId: string): Promise<CreatedRoom> =>
-    post("/api/rooms", { displayName, gameId }),
+  createRoom: (gameId: string): Promise<CreatedRoom> =>
+    post("/api/rooms", { gameId }),
   joinRoom: (code: string, displayName: string, joinToken?: string): Promise<JoinedRoom> =>
     post(`/api/rooms/${encodeURIComponent(code)}/join`, { displayName, joinToken }),
 };
@@ -59,9 +59,11 @@ export function openSocket(
   token: string,
   onMessage: (msg: { type: string; [k: string]: unknown }) => void,
   onClose: () => void,
+  asBoard = false,
 ): Socket {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/ws?room=${encodeURIComponent(roomId)}&token=${encodeURIComponent(token)}`);
+  const cred = asBoard ? `board=${encodeURIComponent(token)}` : `token=${encodeURIComponent(token)}`;
+  const ws = new WebSocket(`${proto}://${location.host}/ws?room=${encodeURIComponent(roomId)}&${cred}`);
   ws.onmessage = (e) => {
     try {
       onMessage(JSON.parse(String(e.data)));

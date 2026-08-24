@@ -128,3 +128,27 @@ footer a { color: var(--dim); }
 @media (prefers-reduced-motion: reduce) {
   button:active { transform: none; }
 }
+
+/* Board mode (desktop/TV): wider canvas, bigger everything */
+#app.board { max-width: 900px; }
+#app.board .code { font-size: 4rem; }
+#app.board .cluebox { font-size: 2.6rem; }
+#app.board .caption { font-size: 1.2rem; }
+#app.board .scores td { font-size: 1.2rem; }
+
+/* Phase countdown */
+.clock {
+  font-family: Sora, sans-serif; font-weight: 800; font-size: 2rem;
+  text-align: center; color: var(--go); padding: 4px 0;
+  font-variant-numeric: tabular-nums;
+}
+.clock.urgent { color: var(--pop); }
+
+/* Guess feed — the comedy record */
+.guessfeed { list-style: none; padding: 0; margin: 4px 0; }
+.guessfeed li { padding: 6px 4px; border-bottom: 1px solid var(--line); }
+.guessfeed li.hit { color: var(--go); }
+.guessfeed li.miss { color: var(--dim); }
+.guessfeed li b { color: var(--ink); font-weight: 600; }
+
+.revealline { font-style: italic; }

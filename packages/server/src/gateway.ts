@@ -23,6 +23,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { MemoryEventLog, type EventLog } from "./log.js";
 import { RoomError, RoomStore, type Room } from "./rooms.js";
 import { GameSession, SessionError } from "./session.js";
+import { VoiceService, voiceConfigFromEnv } from "./voice.js";
 
 interface JoinAttemptWindow {
   count: number;
@@ -47,14 +48,17 @@ const MIME: Record<string, string> = {
   ".webmanifest": "application/manifest+json",
 };
 
-export function createGateway(opts?: { log?: EventLog; now?: () => number; clientDist?: string }): Gateway {
+export function createGateway(opts?: { log?: EventLog; now?: () => number; clientDist?: string; voice?: VoiceService }): Gateway {
   const now = opts?.now ?? (() => Date.now());
   const log = opts?.log ?? new MemoryEventLog();
+  const voice = opts?.voice ?? new VoiceService(voiceConfigFromEnv());
   const clientDist = opts?.clientDist ?? process.env["GWW_CLIENT_DIST"];
   const rooms = new RoomStore();
   const sessions = new Map<string, GameSession>();
   // room.id -> player.id -> sockets (a player may hold more than one device/tab)
   const sockets = new Map<string, Map<string, Set<WebSocket>>>();
+  // room.id -> board sockets (desktop/TV displays — never players, never secrets)
+  const boards = new Map<string, Set<WebSocket>>();
   const joinAttempts = new Map<string, JoinAttemptWindow>();
 
   const arcade: Arcade = createArcade();
@@ -79,6 +83,7 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
     for (const set of roomSockets(roomId).values()) {
       for (const ws of set) send(ws, type, { data: payload });
     }
+    for (const ws of boards.get(roomId) ?? []) send(ws, type, { data: payload });
   }
 
   function toPlayer(roomId: string, playerId: string, type: string, payload: unknown): void {
@@ -156,6 +161,29 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
       return;
     }
 
+    // Ris's intro: cached voiced line when one exists, L0 caption otherwise.
+    // Read-only and instant — generation happens in the background drip.
+    if (req.method === "GET" && path === "/api/voice/intro") {
+      const intro = voice.pickIntro();
+      json(res, 200, {
+        text: intro.text,
+        audioUrl: intro.audioFile !== undefined ? `/api/voice/audio/${intro.audioFile}` : null,
+      });
+      return;
+    }
+
+    const audioMatch = /^\/api\/voice\/audio\/([a-f0-9]{16}\.wav)$/.exec(path);
+    if (req.method === "GET" && audioMatch !== null) {
+      const file = voice.audioPath(audioMatch[1]!);
+      if (file === undefined) {
+        json(res, 404, { error: "NOT_FOUND", message: "No such clip." });
+        return;
+      }
+      res.writeHead(200, { "content-type": "audio/wav", "cache-control": "public, max-age=604800" });
+      createReadStream(file).pipe(res);
+      return;
+    }
+
     if (req.method === "POST" && path === "/api/rooms") {
       const body = await readBody(req);
       const gameId = typeof body["gameId"] === "string" ? (body["gameId"] as string) : "say-less";
@@ -163,15 +191,14 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
         json(res, 404, { error: "UNKNOWN_GAME", message: `No game "${gameId}" on the shelf.` });
         return;
       }
-      const hostName = typeof body["displayName"] === "string" ? (body["displayName"] as string) : "Host";
-      const { room, joinToken } = rooms.create(gameId, now());
-      const { player, playerToken } = rooms.join(room, hostName, now(), joinToken);
+      // The creating device becomes the BOARD (desktop/TV): QR, scores, clues.
+      // Nobody plays on the main screen; phones join and a random phone hosts.
+      const { room, joinToken, boardToken } = rooms.create(gameId, now());
       json(res, 201, {
         roomId: room.id,
         shortCode: room.shortCode,
         joinToken,
-        hostToken: playerToken,
-        playerId: player.id,
+        boardToken,
         gameId,
         expiresAt: room.expiresAt,
       });
@@ -242,6 +269,33 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
       ws.close(4404, "no such room");
       return;
     }
+
+    // Display board: receives all public traffic, never a secret, sends nothing.
+    const boardToken = url.searchParams.get("board");
+    if (boardToken !== null) {
+      if (!rooms.authenticateBoard(room, boardToken)) {
+        send(ws, "error", { error: "BAD_TOKEN", message: "Invalid board token." });
+        ws.close(4401, "bad token");
+        return;
+      }
+      let set = boards.get(room.id);
+      if (set === undefined) {
+        set = new Set();
+        boards.set(room.id, set);
+      }
+      set.add(ws);
+      const session = sessions.get(room.id);
+      send(ws, "hello", {
+        data: { board: true, roomState: room.state, gameId: room.gameId, shortCode: room.shortCode, snapshot: session?.snapshot() },
+      });
+      presence(room);
+      ws.on("message", () => {
+        send(ws, "error", { error: "BOARD_READONLY", message: "The board watches. Phones play." });
+      });
+      ws.on("close", () => { set.delete(ws); });
+      return;
+    }
+
     const player = rooms.authenticate(room, token);
     if (player === undefined) {
       send(ws, "error", { error: "BAD_TOKEN", message: "Invalid player token." });
@@ -283,10 +337,12 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
 
       try {
         if (msg["type"] === "game.start") {
-          if (!player.isHost) throw new SessionError("HOST_ONLY", "Only the host starts the game.");
+          // Any player may start the game; the HOST is then picked at random —
+          // hosting is a job the room assigns, not a reward for scanning first.
           if (sessions.has(room.id)) throw new SessionError("ALREADY_STARTED", "Game already started.");
           if (room.players.size < 2) throw new SessionError("TOO_FEW_PLAYERS", "Need at least 2 players.");
           const seed = typeof msg["seed"] === "number" ? (msg["seed"] as number) : Math.floor(Math.random() * 2 ** 31);
+          rooms.assignRandomHost(room);
           room.state = "PLAYING";
           const s = new GameSession(
             room,
@@ -300,8 +356,8 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
           );
           sessions.set(room.id, s);
           presence(room);
-          // The host pressed Start — round 1 begins now, not on a second tap.
-          s.command(player.id, true, "round.start", {});
+          // Round 1 begins the moment the game starts — no second tap needed.
+          s.command("game", true, "round.start", {});
           return;
         }
 
@@ -342,6 +398,7 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
       }),
     close: () =>
       new Promise<void>((resolve) => {
+        voice.stop();
         for (const s of sessions.values()) s.dispose();
         // Terminate live sockets first — server.close() waits for open
         // connections and would otherwise hang until every phone left.

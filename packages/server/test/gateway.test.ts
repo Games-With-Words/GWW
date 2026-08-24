@@ -36,9 +36,17 @@ interface Client {
   sawType(type: string): boolean;
 }
 
+function connectBoard(roomId: string, boardToken: string): Promise<Client> {
+  return connectWith(`ws://127.0.0.1:${port}/ws?room=${roomId}&board=${boardToken}`);
+}
+
 function connect(roomId: string, token: string): Promise<Client> {
+  return connectWith(`ws://127.0.0.1:${port}/ws?room=${roomId}&token=${token}`);
+}
+
+function connectWith(url: string): Promise<Client> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?room=${roomId}&token=${token}`);
+    const ws = new WebSocket(url);
     const messages: any[] = [];
     const waiters: { type: string; resolve: (m: any) => void }[] = [];
     ws.on("message", (raw) => {
@@ -52,8 +60,8 @@ function connect(roomId: string, token: string): Promise<Client> {
       if (msg.type === "hello") {
         resolve({
           ws,
-          playerId: msg.data.playerId,
-          isHost: msg.data.isHost,
+          playerId: msg.data.playerId ?? "board",
+          isHost: msg.data.isHost ?? false,
           messages,
           next: (type, timeoutMs = 3000) =>
             new Promise((res, rej) => {
@@ -82,10 +90,12 @@ describe("lobby HTTP", () => {
     expect(json.games[0].credit.maker).toBe("The Oracle");
   });
 
-  it("creates a room and joins by short code", async () => {
-    const created = await api("/api/rooms", { displayName: "Mark" });
+  it("creates a board room and joins by short code", async () => {
+    const created = await api("/api/rooms", {});
     expect(created.status).toBe(201);
     expect(created.json.shortCode).toMatch(/^[2-9A-HJ-NP-Z]{6}$/);
+    expect(created.json.boardToken.length).toBeGreaterThan(10);
+    expect(created.json.hostToken).toBeUndefined();
 
     const joined = await api(`/api/rooms/${created.json.shortCode}/join`, { displayName: "Ris" });
     expect(joined.status).toBe(201);
@@ -93,7 +103,8 @@ describe("lobby HTTP", () => {
   });
 
   it("rejects duplicate display names and unknown rooms", async () => {
-    const created = await api("/api/rooms", { displayName: "Mark" });
+    const created = await api("/api/rooms", {});
+    await api(`/api/rooms/${created.json.shortCode}/join`, { displayName: "Mark" });
     const dup = await api(`/api/rooms/${created.json.shortCode}/join`, { displayName: "mark" });
     expect(dup.status).toBe(400);
     expect(dup.json.error).toBe("NAME_TAKEN");
@@ -103,7 +114,7 @@ describe("lobby HTTP", () => {
   });
 
   it("rejects a wrong join token but accepts the bare code", async () => {
-    const created = await api("/api/rooms", { displayName: "Mark" });
+    const created = await api("/api/rooms", {});
     const bad = await api(`/api/rooms/${created.json.shortCode}/join`, {
       displayName: "Intruder",
       joinToken: "not-the-token",
@@ -121,22 +132,24 @@ describe("lobby HTTP", () => {
 
 describe("realtime round", () => {
   async function threePlayerRoom() {
-    const created = await api("/api/rooms", { displayName: "Mark" });
+    const created = await api("/api/rooms", {});
+    const p1 = await api(`/api/rooms/${created.json.shortCode}/join`, { displayName: "Mark" });
     const p2 = await api(`/api/rooms/${created.json.shortCode}/join`, { displayName: "Ris" });
     const p3 = await api(`/api/rooms/${created.json.shortCode}/join`, { displayName: "Sonia" });
-    const host = await connect(created.json.roomId, created.json.hostToken);
+    const board = await connectBoard(created.json.roomId, created.json.boardToken);
+    const mark = await connect(created.json.roomId, p1.json.playerToken);
     const ris = await connect(created.json.roomId, p2.json.playerToken);
     const sonia = await connect(created.json.roomId, p3.json.playerToken);
     const tokens = new Map<string, string>([
-      [host.playerId, created.json.hostToken],
+      [mark.playerId, p1.json.playerToken],
       [ris.playerId, p2.json.playerToken],
       [sonia.playerId, p3.json.playerToken],
     ]);
-    return { created, host, ris, sonia, all: [host, ris, sonia], tokens };
+    return { created, board, host: mark, ris, sonia, all: [mark, ris, sonia], tokens };
   }
 
   it("runs a full round with secret isolation — the release blocker", async () => {
-    const { host, ris, sonia, all } = await threePlayerRoom();
+    const { board, host, ris, sonia, all } = await threePlayerRoom();
 
     host.send({ type: "game.start", seed: 42 });
     await host.next("state");
@@ -150,12 +163,14 @@ describe("realtime round", () => {
     const secretWord: string = secretMsg.data.card.secret;
     expect(secretWord.length).toBeGreaterThan(0);
 
-    // No other device's entire message history contains the secret string.
-    for (const c of all) {
+    // No other device's entire message history contains the secret string —
+    // including the BOARD, which is on the shared display by definition.
+    for (const c of [...all, board]) {
       if (c === speaker) continue;
       const everything = JSON.stringify(c.messages);
       expect(everything.includes(secretWord)).toBe(false);
     }
+    expect(board.sawType("secret")).toBe(false);
 
     // Public state carries phase/budget but never card contents.
     const state = all[0]!.messages.filter((m) => m.type === "state").at(-1)!;
@@ -197,18 +212,27 @@ describe("realtime round", () => {
     const err = await notSpeaker.next("error");
     expect(err.error).toBe("NOT_SPEAKER");
 
-    const nonHost = all.find((c) => !c.isHost)!;
+    // Host is randomly assigned at game start — read it from presence.
+    const pres = all[0]!.messages.filter((m) => m.type === "presence").at(-1)!;
+    const hostId = pres.data.players.find((p: any) => p.isHost).id;
+    const nonHost = all.find((c) => c.playerId !== hostId)!;
     nonHost.send({ type: "command", name: "round.end", payload: {} });
     const err2 = await nonHost.next("error");
     expect(err2.error).toBe("HOST_ONLY");
   });
 
-  it("non-host cannot start the game; too-few players cannot start", async () => {
-    const created = await api("/api/rooms", { displayName: "Solo" });
-    const host = await connect(created.json.roomId, created.json.hostToken);
-    host.send({ type: "game.start" });
-    const err = await host.next("error");
+  it("a lone phone cannot start; the board cannot send at all", async () => {
+    const created = await api("/api/rooms", {});
+    const p1 = await api(`/api/rooms/${created.json.shortCode}/join`, { displayName: "Solo" });
+    const solo = await connect(created.json.roomId, p1.json.playerToken);
+    solo.send({ type: "game.start" });
+    const err = await solo.next("error");
     expect(err.error).toBe("TOO_FEW_PLAYERS");
+
+    const board = await connectBoard(created.json.roomId, created.json.boardToken);
+    board.send({ type: "game.start" });
+    const err2 = await board.next("error");
+    expect(err2.error).toBe("BOARD_READONLY");
   });
 
   it("reconnecting speaker gets the secret again; reconnecting guesser does not", async () => {

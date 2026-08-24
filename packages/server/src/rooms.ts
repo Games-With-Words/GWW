@@ -21,6 +21,8 @@ export interface Room {
   id: string;
   shortCode: string;
   joinTokenHash: string;
+  /** Display-board credential (desktop/TV). A board is never a player. */
+  boardTokenHash: string;
   state: LobbyState;
   gameId: string;
   players: Map<string, RoomPlayer>;
@@ -53,8 +55,10 @@ export class RoomStore {
   create(gameId: string, now: number, ttlMs: number = DEFAULT_ROOM_TTL_MS): {
     room: Room;
     joinToken: string;
+    boardToken: string;
   } {
     const joinToken = newToken();
+    const boardToken = newToken();
     let shortCode = newShortCode();
     while (this.byCode.has(shortCode)) shortCode = newShortCode();
 
@@ -62,6 +66,7 @@ export class RoomStore {
       id: newId("room"),
       shortCode,
       joinTokenHash: hashToken(joinToken),
+      boardTokenHash: hashToken(boardToken),
       state: "CREATED",
       gameId,
       players: new Map(),
@@ -71,7 +76,7 @@ export class RoomStore {
     };
     this.rooms.set(room.id, room);
     this.byCode.set(shortCode, room.id);
-    return { room, joinToken };
+    return { room, joinToken, boardToken };
   }
 
   get(roomId: string, now: number): Room | undefined {
@@ -118,7 +123,9 @@ export class RoomStore {
       displayName: name,
       tokenHash: hashToken(playerToken),
       connected: false,
-      isHost: room.players.size === 0,
+      // Nobody is host at join time. The host is picked at RANDOM when the
+      // game starts — hosting is a job, not a reward for scanning first.
+      isHost: false,
       joinedAt: now,
     };
     room.players.set(player.id, player);
@@ -133,6 +140,22 @@ export class RoomStore {
       if (p.tokenHash === h) return p;
     }
     return undefined;
+  }
+
+  /** Authenticate a display board by its token. */
+  authenticateBoard(room: Room, boardToken: string): boolean {
+    return hashToken(boardToken) === room.boardTokenHash;
+  }
+
+  /** Pick a random connected player as host (called once, at game start). */
+  assignRandomHost(room: Room): RoomPlayer | undefined {
+    const candidates = [...room.players.values()].filter((p) => p.connected);
+    const pool = candidates.length > 0 ? candidates : [...room.players.values()];
+    if (pool.length === 0) return undefined;
+    for (const p of room.players.values()) p.isHost = false;
+    const chosen = pool[Math.floor(Math.random() * pool.length)]!;
+    chosen.isHost = true;
+    return chosen;
   }
 
   /** Host revokes the join link; a new token is issued (spec §11). */

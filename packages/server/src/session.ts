@@ -38,8 +38,13 @@ function publicRound(round: RoundState | undefined) {
     clue: round.clue,
     guessCount: round.guesses.length,
     guessedPlayerIds: round.guesses.map((g) => g.playerId),
+    // The public guess feed — wrong guesses are half the comedy (spec §04:
+    // "the humor comes from ... misunderstanding and the group's reaction").
+    guesses: round.guesses.map((g) => ({ playerId: g.playerId, value: g.value, correct: g.correct })),
     winnerId: round.winnerId,
     endedReason: round.endedReason,
+    // The card's reveal line goes public the moment the round completes.
+    ...(round.phase === "COMPLETE" ? { revealLine: round.card.revealLine } : {}),
   };
 }
 
@@ -76,14 +81,18 @@ export class GameSession {
   }
 
   private timer: ReturnType<typeof setTimeout> | undefined;
+  /** Server-time deadline of the active phase timer, for client countdowns. */
+  private deadline: number | undefined;
 
   private clearTimer(): void {
     if (this.timer !== undefined) clearTimeout(this.timer);
     this.timer = undefined;
+    this.deadline = undefined;
   }
 
   private armTimer(ms: number): void {
     this.clearTimer();
+    this.deadline = this.now() + ms;
     this.timer = setTimeout(() => {
       try {
         if (this.state.status === "IN_ROUND") {
@@ -106,7 +115,7 @@ export class GameSession {
       if (e.type === "clue.accepted") this.armTimer(this.guessTimeoutMs);
       if (e.type === "round.completed" || e.type === "game.completed") this.clearTimer();
     }
-    this.callbacks.broadcast("state", publicState(this.state));
+    this.callbacks.broadcast("state", this.snapshot());
   }
 
   /** Private delivery of the secret card to the Speaker only (spec §04 step 2). */
@@ -175,9 +184,9 @@ export class GameSession {
     }
   }
 
-  /** Redacted state for join/reconnect snapshots. */
+  /** Redacted state for join/reconnect snapshots (with the phase deadline). */
   snapshot() {
-    return publicState(this.state);
+    return { ...publicState(this.state), deadline: this.deadline, serverTime: this.now() };
   }
 
   /** Re-deliver the secret to a reconnecting Speaker — and ONLY the Speaker. */
