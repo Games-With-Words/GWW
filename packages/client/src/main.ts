@@ -8,6 +8,7 @@
  */
 
 import QRCode from "qrcode";
+import { scenes, score } from "./cinema.js";
 import { api, openSocket, type CreatedRoom, type GameTile, type Socket } from "./api.js";
 import {
   amHost,
@@ -85,9 +86,12 @@ function connect(rid: string, token: string, board: boolean): void {
           room = reduce(room, { type: "state", data: d.snapshot });
         }
       } else if (room !== undefined) {
+        const before = room;
         room = reduce(room, msg);
-        if (msg.type === "event" && (msg["data"] as { type?: string } | undefined)?.type === "game.started") {
-          void playIntroOnBoard();
+        if (msg.type === "event") {
+          const ev = msg["data"] as { type?: string; [k: string]: unknown } | undefined;
+          if (ev?.type === "game.started") void playIntroOnBoard();
+          if (room.isBoard && ev?.type !== undefined) boardCinema(before, room, ev);
         }
         if (msg.type === "error") setTimeout(() => { if (room?.error !== undefined) { room = { ...room, error: undefined }; render(); } }, 4000);
       }
@@ -103,6 +107,57 @@ function connect(rid: string, token: string, board: boolean): void {
 
 function command(name: string, payload: Record<string, unknown> = {}): void {
   socket?.send({ type: "command", name, payload });
+}
+
+/* -------------------------------------------------------- board cinema */
+
+let creditsRolled = false;
+function boardCinema(before: RoomState, after: RoomState, ev: { type?: string; [k: string]: unknown }): void {
+  switch (ev.type) {
+    case "game.started":
+      scenes.title("Say Less");
+      return;
+    case "round.started":
+      score.roundOpen();
+      return;
+    case "clue.accepted":
+      score.clue();
+      return;
+    case "guess.submitted":
+      score.guess();
+      return;
+    case "round.completed": {
+      const secret = String(ev["secret"] ?? "");
+      const winnerId = ev["winnerId"] !== undefined ? String(ev["winnerId"]) : undefined;
+      const line = after.game?.round?.revealLine;
+      if (secret.length > 0) {
+        scenes.reveal(secret, line, winnerId !== undefined ? nameOf(after, winnerId) : undefined);
+      }
+      return;
+    }
+    case "game.completed": {
+      if (creditsRolled) return;
+      creditsRolled = true;
+      const totals = (ev["totals"] ?? {}) as Record<string, number>;
+      const cast = after.players.map((p) => ({ name: p.displayName, score: totals[p.id] ?? 0 }));
+      scenes.credits(cast, "SAY LESS", "The Oracle");
+      return;
+    }
+  }
+  void before;
+}
+
+/** Countdown pressure: tick each second under 10s (board only). */
+let lastTickSecond = -1;
+function boardTick(): void {
+  if (room?.isBoard !== true || room.game?.status !== "IN_ROUND") return;
+  const ms = msLeft(room, Date.now());
+  if (ms === undefined) return;
+  const secs = Math.ceil(ms / 1000);
+  if (secs <= 10 && secs >= 0 && secs !== lastTickSecond) {
+    lastTickSecond = secs;
+    score.tick(10 - secs);
+  }
 }
 
 /** The board speaks Ris's intro when the game starts. Fire-and-forget:
@@ -141,7 +196,14 @@ function esc(s: string): string {
 
 function render(): void {
   app.replaceChildren();
-  app.classList.toggle("board", room?.isBoard === true && screen.kind === "room");
+  const boardMode = room?.isBoard === true && screen.kind === "room";
+  app.classList.toggle("board", boardMode);
+  document.body.classList.toggle("theater", boardMode);
+  const msRemaining = room !== undefined ? msLeft(room, Date.now()) : undefined;
+  document.body.classList.toggle(
+    "tension",
+    boardMode && room?.game?.status === "IN_ROUND" && msRemaining !== undefined && msRemaining <= 10_000,
+  );
   switch (screen.kind) {
     case "home": renderHome(screen.games); break;
     case "join": renderJoin(screen.code, screen.token); break;
@@ -155,7 +217,7 @@ function render(): void {
 function syncTicker(): void {
   const running = room?.game?.deadline !== undefined && room.game.status === "IN_ROUND";
   if (running && ticker === undefined) {
-    ticker = setInterval(() => { if (screen.kind === "room") render(); }, 1000);
+    ticker = setInterval(() => { if (screen.kind === "room") { boardTick(); render(); } }, 1000);
   } else if (!running && ticker !== undefined) {
     clearInterval(ticker);
     ticker = undefined;
@@ -263,8 +325,24 @@ function playerList(s: RoomState): HTMLElement {
 
 /* --------------------------------------------------------------- board */
 
+const ATTRACT_LINES = [
+  "Tonight's feature: your friends, under pressure.",
+  "No strangers. No accounts. No mercy.",
+  "One secret word. Too few words to give it away.",
+  "The best rounds become inside jokes. Bring popcorn.",
+  "A random player becomes the host. Fate decides.",
+];
+let attractIdx = 0;
+let attractTimer: ReturnType<typeof setInterval> | undefined;
+
 function renderBoardLobby(s: RoomState): void {
-  app.append(el(`<div><div class="brand">Games With Words</div><h2>Scan in — the show starts soon</h2></div>`));
+  if (attractTimer === undefined) {
+    attractTimer = setInterval(() => {
+      attractIdx = (attractIdx + 1) % ATTRACT_LINES.length;
+      if (room?.game === undefined && screen.kind === "room") render();
+    }, 5000);
+  }
+  app.append(el(`<div class="attract-head"><div class="cine-studio-inline">INTERCHAINED LLC LABS <span>presents</span></div><h1 class="attract-title">SAY LESS</h1><p class="attract-line">${esc(ATTRACT_LINES[attractIdx]!)}</p></div>`));
   if (created !== undefined) {
     const url = joinUrl(location.origin, created.shortCode, created.joinToken);
     const card = el(`<div class="card stack">
@@ -276,7 +354,7 @@ function renderBoardLobby(s: RoomState): void {
     void QRCode.toCanvas(card.querySelector("#qr") as HTMLCanvasElement, url, { width: 260, margin: 1 });
   }
   app.append(playerList(s));
-  app.append(el(`<p class="dim" style="text-align:center">${s.players.length < 2 ? "Waiting for at least 2 phones — nobody plays on this screen." : "Ready! Any phone can hit Start — a random player becomes the host."}</p>`));
+  app.append(el(`<p class="dim" style="text-align:center">${s.players.length < 2 ? "Now seating — scan to take your seat. Nobody plays on this screen." : "House is full enough. Any phone can hit Start."}</p>`));
 }
 
 function guessFeed(s: RoomState): HTMLElement | undefined {
