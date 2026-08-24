@@ -18,6 +18,11 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
 body {
   font-family: Inter, system-ui, sans-serif;
   min-height: 100dvh;
+  /* Phones: no rubber-band reveal of the page behind, no 300ms tap delay,
+     no grey flash on every button in a fast-moving party game. */
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
   background:
     radial-gradient(1200px 600px at 80% -10%, #2b1a4d66, transparent),
     radial-gradient(900px 500px at -10% 110%, #0f3d3a66, transparent),
@@ -49,6 +54,9 @@ button, .btn {
   border-radius: 14px; padding: 16px 20px; width: 100%;
   background: var(--accent); color: #1a1405;
   transition: transform 0.06s ease;
+  /* 48px floor: a thumb in a loud room is not a precise instrument. */
+  min-height: 48px;
+  touch-action: manipulation;
 }
 button:active { transform: scale(0.98); }
 button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
@@ -59,9 +67,30 @@ button:disabled { opacity: 0.45; cursor: default; }
 input[type="text"] {
   width: 100%; padding: 16px; border-radius: 14px;
   border: 1px solid var(--line); background: #0f0f1c; color: var(--ink);
-  font: 500 1.1rem Inter, sans-serif;
+  /* 16px is the iOS zoom threshold — below it Safari zooms the page on focus
+     and does NOT zoom back out. max() makes that impossible to regress. */
+  font: 500 max(16px, 1.05rem) Inter, sans-serif;
+  min-height: 52px;
 }
 input[type="text"]:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+/* The composer — clue and guess entry.
+   Found in live play: the form sat at the bottom of a growing page, so with
+   the keyboard up and a 45s clock running the player had to SCROLL to find
+   the input. It is now pinned to the bottom of the viewport, above the
+   keyboard, inside the safe area. The feed keeps scrolling underneath it. */
+.composer {
+  position: sticky;
+  bottom: calc(env(safe-area-inset-bottom) * -1);
+  z-index: 20;
+  margin: 12px 0 0;
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, #15152200, var(--card) 18%);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(8px);
+}
+/* Nothing hides behind the pinned composer when scrolled to the end. */
+#app { scroll-padding-bottom: 140px; }
 
 .row { display: flex; gap: 10px; align-items: center; }
 .grow { flex: 1; }
@@ -75,9 +104,13 @@ input[type="text"]:focus { outline: 2px solid var(--accent); border-color: trans
 
 /* Lobby */
 .code {
-  font-family: Sora, monospace; font-size: 2.4rem; font-weight: 800;
-  letter-spacing: 0.35em; text-align: center; color: var(--accent);
+  font-family: Sora, monospace; font-weight: 800;
+  /* Six characters at 0.35em tracking overflowed a 320px viewport. */
+  font-size: clamp(1.6rem, 11vw, 2.4rem);
+  letter-spacing: clamp(0.12em, 4vw, 0.35em);
+  text-align: center; color: var(--accent);
   padding: 10px 0 4px;
+  overflow-wrap: anywhere;
 }
 .qr { display: flex; justify-content: center; padding: 8px; }
 .qr canvas { border-radius: 12px; background: #fff; padding: 10px; }
@@ -97,11 +130,19 @@ input[type="text"]:focus { outline: 2px solid var(--accent); border-color: trans
 .rolepill.HOST { background: var(--accent); color: #1a1405; }
 
 .secretcard { border: 2px solid var(--pop); }
-.secretword { font-family: Sora, sans-serif; font-size: 2rem; font-weight: 800; text-align: center; padding: 6px 0; }
+.secretword {
+  font-family: Sora, sans-serif; font-weight: 800; text-align: center; padding: 6px 0;
+  font-size: clamp(1.5rem, 8vw, 2rem);
+  overflow-wrap: anywhere; text-wrap: balance;
+}
 .forbidden { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
 .forbidden span { background: #2b1220; color: #ff9db4; border: 1px solid #57223b; padding: 4px 10px; border-radius: 999px; font-size: 0.85rem; }
 
-.cluebox { font-family: Sora, sans-serif; font-size: 1.6rem; font-weight: 700; text-align: center; padding: 12px 0; }
+.cluebox {
+  font-family: Sora, sans-serif; font-weight: 700; text-align: center; padding: 12px 0;
+  font-size: clamp(1.25rem, 6.5vw, 1.6rem);
+  overflow-wrap: anywhere; text-wrap: balance;
+}
 .budget { text-align: center; color: var(--dim); }
 
 .caption {
@@ -129,12 +170,26 @@ footer a { color: var(--dim); }
   button:active { transform: none; }
 }
 
+/* Landscape phone — a couch full of people turning the handset sideways.
+   Vertical space is the scarce axis; give the type and padding back. */
+@media (max-height: 480px) and (orientation: landscape) {
+  #app { padding-top: 8px; }
+  h1 { font-size: 1.5rem; margin: 0.2em 0; }
+  .card { padding: 12px; margin: 6px 0; }
+  .clock { font-size: 1.4rem; padding: 0; }
+  .code { font-size: clamp(1.4rem, 6vw, 2rem); padding: 4px 0 0; }
+  .secretword { font-size: clamp(1.3rem, 5vw, 1.8rem); }
+  .cine { padding: 3vh 6vw; }
+  footer { padding-top: 12px; }
+}
+
 /* Board mode (desktop/TV): wider canvas, bigger everything */
 #app.board { max-width: 900px; }
 #app.board .code { font-size: 4rem; }
 #app.board .cluebox { font-size: 2.6rem; }
 #app.board .caption { font-size: 1.2rem; }
 #app.board .scores td { font-size: 1.2rem; }
+#app.board .composer { position: static; backdrop-filter: none; }
 
 /* Phase countdown */
 .clock {

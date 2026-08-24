@@ -326,7 +326,8 @@ function renderHome(games: GameTile[]): void {
 
   const joinCard = el(`<div class="card stack">
     <h2>Joining from your phone?</h2>
-    <input id="code" type="text" placeholder="ROOM CODE" autocapitalize="characters" autocomplete="off" maxlength="6" />
+    <input id="code" type="text" placeholder="ROOM CODE" autocapitalize="characters"
+           autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="go" maxlength="6" />
     <button class="secondary" id="joinbtn">Join a room</button>
   </div>`);
   joinCard.querySelector("#joinbtn")!.addEventListener("click", () => {
@@ -342,7 +343,8 @@ function renderJoin(code: string, token?: string): void {
   const card = el(`<div class="card stack">
     <h2>Join room ${esc(code)}</h2>
     ${formError.length > 0 ? `<div class="error">${esc(formError)}</div>` : ""}
-    <input id="name" type="text" placeholder="Your name" maxlength="24" autocomplete="off" />
+    <input id="name" type="text" placeholder="Your name" maxlength="24"
+           autocomplete="off" autocorrect="off" autocapitalize="words" enterkeyhint="go" />
     <button id="go"${busy ? " disabled" : ""}>I'm here</button>
     <button class="secondary" id="back">Back</button>
   </div>`);
@@ -498,8 +500,9 @@ function renderPhoneGame(s: RoomState): void {
       app.append(el(`<div class="card">Fetching your secret…</div>`));
     }
     if (round.phase === "AWAITING_CLUE") {
-      const form = el(`<div class="card stack">
-        <input id="clue" type="text" placeholder="Your ${round.budget}-word clue" autocomplete="off" />
+      const form = el(`<div class="card stack composer">
+        <input id="clue" type="text" placeholder="Your ${round.budget}-word clue"
+               autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="send" />
         <button id="send">Send clue to the room</button>
       </div>`);
       const input = form.querySelector("#clue") as HTMLInputElement;
@@ -524,8 +527,9 @@ function renderPhoneGame(s: RoomState): void {
       if (hasGuessed(s)) {
         app.append(el(`<p class="dim" style="text-align:center">Your one guess is in. Sweat it out.</p>`));
       } else {
-        const form = el(`<div class="card stack">
-          <input id="guess" type="text" placeholder="One guess. Make it count." autocomplete="off" />
+        const form = el(`<div class="card stack composer">
+          <input id="guess" type="text" placeholder="One guess. Make it count."
+                 autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="send" />
           <button id="send" class="go">Guess!</button>
         </div>`);
         const input = form.querySelector("#guess") as HTMLInputElement;
