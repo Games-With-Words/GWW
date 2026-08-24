@@ -27,6 +27,25 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.20.1)
 
+  packages/forge:
+    dependencies:
+      '@gww/say-less':
+        specifier: workspace:*
+        version: link:../say-less
+      sentinel-blocks:
+        specifier: ^1.0.2
+        version: 1.0.2
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.20.1)
+
   packages/kit:
     devDependencies:
       typescript:
@@ -51,6 +70,9 @@ importers:
 
   packages/server:
     dependencies:
+      '@gww/forge':
+        specifier: workspace:*
+        version: link:../forge
       '@gww/kit':
         specifier: workspace:*
         version: link:../kit
