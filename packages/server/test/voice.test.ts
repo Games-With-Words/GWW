@@ -183,6 +183,35 @@ describe("VoiceService", () => {
     expect(r.text).toBe("Ris found her voice inside the reasoning stream tonight!");
   });
 
+  it("quarantines lines the retired parser wrote — kept on disk, never spoken", async () => {
+    const { writeFileSync } = await import("node:fs");
+    const c = cfg();
+    // A bank as it exists tonight: junk mined from muse's scratchpad (untagged)
+    // beside a line extracted from a real sentinel block.
+    writeFileSync(join(c.cacheDir, "lines.json"), JSON.stringify({
+      entries: [
+        { hash: "a".repeat(16), text: "Which to choose? Let's randomize with seed. Seed 178753538", file: `${"a".repeat(16)}.wav`, createdAt: Date.now(), source: "muse", cue: "intro" },
+        { hash: "b".repeat(16), text: "I'll produce one line.", file: `${"b".repeat(16)}.wav`, createdAt: Date.now(), source: "muse", cue: "clue" },
+        { hash: "c".repeat(16), text: "A trustworthy line that came from a sentinel block.", file: `${"c".repeat(16)}.wav`, createdAt: Date.now(), source: "muse", cue: "outro", parser: "sentinel" },
+      ],
+    }));
+    writeFileSync(join(c.cacheDir, `${"c".repeat(16)}.wav`), new Uint8Array(4096).fill(1));
+
+    const v = new VoiceService(c, fakeFetch("unused"));
+    // The scratchpad lines can never be spoken again.
+    expect(L0_INTRO_LINES).toContain(v.pickIntro().text);
+    expect(v.pickLine("clue").audioFile).toBeUndefined();
+    // The trustworthy one survives, audio and all.
+    expect(v.pickLine("outro").text).toBe("A trustworthy line that came from a sentinel block.");
+    expect(v.pickLine("outro").audioFile).toBeDefined();
+    // Budget isn't held hostage by renders that produced nothing speakable.
+    expect(v.generatedToday()).toBe(1);
+    // NOTHING was deleted — the manifest on disk is byte-for-byte untouched.
+    const { readFileSync } = await import("node:fs");
+    const onDisk = JSON.parse(readFileSync(join(c.cacheDir, "lines.json"), "utf8")) as { entries: unknown[] };
+    expect(onDisk.entries).toHaveLength(3);
+  });
+
   it("audioPath refuses anything but content-addressed names", () => {
     const v = new VoiceService(cfg(), fakeFetch("unused"));
     expect(v.audioPath("../../etc/passwd")).toBeUndefined();

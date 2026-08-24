@@ -92,7 +92,14 @@ interface VoiceEntry {
   source: "muse" | "seed";
   /** Which hosting moment this line serves. Legacy entries default to intro. */
   cue?: Cue;
+  /** Which extractor produced this text. Anything but "sentinel" came from the
+   *  heuristic miner we retired — it cached muse's scratchpad into WAVs, so
+   *  those entries are quarantined at boot rather than trusted — never deleted. */
+  parser?: string;
 }
+
+/** Entries the retired heuristic parser produced are not trusted. */
+const TRUSTED_PARSER = "sentinel";
 
 interface Manifest {
   entries: VoiceEntry[];
@@ -216,6 +223,33 @@ export class VoiceService {
         this.manifest = { entries: [] };
       }
     }
+    this.logBank();
+  }
+
+  /** Lines the retired heuristic parser wrote are QUARANTINED, never deleted:
+   *  the manifest and every WAV stay exactly as they are on disk. They simply
+   *  stop being pickable, because that parser voiced muse's deliberation
+   *  ("Which to choose? Let's randomize with seed") into real audio. */
+  private trusted(): VoiceEntry[] {
+    return this.manifest.entries.filter((e) => e.parser === TRUSTED_PARSER);
+  }
+
+  /** Say what Ris can actually say. A silent bank was invisible for a whole
+   *  night of "why is audioUrl null" — the cache is now read out at boot. */
+  private logBank(): void {
+    const quarantined = this.manifest.entries.length - this.trusted().length;
+    if (quarantined > 0) {
+      console.log(`[voice] ${quarantined} line(s) quarantined — written by the retired parser, kept on disk, never spoken`);
+    }
+    for (const cue of CUES) {
+      const lines = this.trusted().filter((e) => (e.cue ?? "intro") === cue);
+      if (lines.length === 0) {
+        console.log(`[voice] bank ${cue}: SILENT (L0 captions only)`);
+        continue;
+      }
+      console.log(`[voice] bank ${cue}: ${lines.length} voiced`);
+      for (const l of lines) console.log(`[voice]   - "${l.text}"`);
+    }
   }
 
   private save(): void {
@@ -231,7 +265,9 @@ export class VoiceService {
     const d = new Date(this.now());
     d.setHours(0, 0, 0, 0);
     const midnight = d.getTime();
-    return this.manifest.entries.filter((e) => e.createdAt >= midnight).length;
+    // Quarantined renders don't hold budget hostage — they produced nothing
+    // speakable, so they don't count against tonight's allowance.
+    return this.trusted().filter((e) => e.createdAt >= midnight).length;
   }
 
   /**
@@ -239,7 +275,7 @@ export class VoiceService {
    * hand-written L0 line, caption-only. NEVER waits on generation.
    */
   pickLine(cue: Cue): { text: string; audioFile: string | undefined } {
-    const voiced = this.manifest.entries.filter((e) => (e.cue ?? "intro") === cue);
+    const voiced = this.trusted().filter((e) => (e.cue ?? "intro") === cue);
     if (voiced.length > 0) {
       const e = voiced[Math.floor(Math.random() * voiced.length)]!;
       const path = join(this.cfg.cacheDir, e.file);
@@ -259,7 +295,7 @@ export class VoiceService {
     let best: Cue = "intro";
     let bestCount = Infinity;
     for (const c of CUES) {
-      const n = this.manifest.entries.filter((e) => (e.cue ?? "intro") === c).length;
+      const n = this.trusted().filter((e) => (e.cue ?? "intro") === c).length;
       if (n < bestCount) { best = c; bestCount = n; }
     }
     return best;
@@ -362,7 +398,9 @@ export class VoiceService {
 
     const file = `${hash}.wav`;
     writeFileSync(join(this.cfg.cacheDir, file), audio);
-    this.manifest.entries.push({ hash, text: line, file, createdAt: this.now(), source: "muse", cue });
+    this.manifest.entries.push({
+      hash, text: line, file, createdAt: this.now(), source: "muse", cue, parser: TRUSTED_PARSER,
+    });
     this.save();
     console.log(`[voice] new Ris ${cue} line cached (${audio.length} bytes): "${line}"`);
     return { status: "ok", text: line, cue };
@@ -380,11 +418,22 @@ export class VoiceService {
         // Warm-up sprint: until EVERY cue has at least one voiced line, keep
         // rendering every 15s (budget still rules). Ris has a show tonight —
         // she can't learn one cue per 144 minutes.
-        const empty = CUES.filter((c) => !this.manifest.entries.some((e) => (e.cue ?? "intro") === c));
-        if (empty.length > 0 && this.generatedToday() < this.cfg.dailyMax) {
-          console.log(`[voice] warm-up: ${empty.length} cue(s) still silent (${empty.join(", ")}) — next render in 15s`);
-          setTimeout(() => void this.replenishLogged(), 15_000).unref?.();
+        const empty = CUES.filter((c) => !this.trusted().some((e) => (e.cue ?? "intro") === c));
+        if (empty.length === 0) {
+          console.log(`[voice] warm-up complete — every cue has a voice`);
+          return;
         }
+        // The silent skip cost us a debugging round: the sprint looked broken
+        // when it was only out of budget. Say WHY it stopped.
+        if (this.generatedToday() >= this.cfg.dailyMax) {
+          console.log(
+            `[voice] warm-up HELD: budget spent (${this.generatedToday()}/${this.cfg.dailyMax} today), ` +
+            `${empty.length} cue(s) still silent (${empty.join(", ")}) — raise GWW_VOICE_DAILY_MAX to finish tonight`,
+          );
+          return;
+        }
+        console.log(`[voice] warm-up: ${empty.length} cue(s) still silent (${empty.join(", ")}) — next render in 15s`);
+        setTimeout(() => void this.replenishLogged(), 15_000).unref?.();
         return;
       }
       console.log(`[voice] replenish: ${r.status}${r.cue !== undefined ? ` (cue: ${r.cue})` : ""}`);
