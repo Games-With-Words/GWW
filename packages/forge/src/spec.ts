@@ -56,6 +56,12 @@ export interface ContentSpec<T> {
   gate(raw: unknown): GateResult<T>;
   /** Dedupe identity — normalized, compared across every existing pack. */
   key(item: T): string;
+  /**
+   * Human-readable rendering for the CLI. The operator is reviewing content,
+   * not counting rows — showing only the dedupe key hides the thing being
+   * judged. Optional; falls back to the key.
+   */
+  preview?(item: T): string;
 }
 
 /**

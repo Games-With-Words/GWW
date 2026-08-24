@@ -317,6 +317,35 @@ describe("generation", () => {
     else expect.fail("expected a gate rejection");
   });
 
+  it("shows the WHOLE card as it lands, not just the dedupe key", async () => {
+    const lines: string[] = [];
+    await generateBatch(sayLessCards, cfg(), 1, {
+      fetcher: fakeModel([goodCard]),
+      maxAttempts: 1,
+      onProgress: (m) => lines.push(m),
+    });
+    const out = lines.join("\n");
+    // Every field a reviewer needs to judge the card must be on screen.
+    expect(out).toContain("Air guitar");
+    expect(out).toContain("air guitar solo");
+    expect(out).toContain("Music");
+    expect(out).toContain("instrument");
+    expect(out).toContain("difficulty 3/4");
+    expect(out).toContain("Zero strings attached.");
+  });
+
+  it("falls back to the key for a spec with no preview", async () => {
+    const bare = { ...sayLessCards };
+    delete (bare as { preview?: unknown }).preview;
+    const lines: string[] = [];
+    await generateBatch(bare, cfg(), 1, {
+      fetcher: fakeModel([goodCard]),
+      maxAttempts: 1,
+      onProgress: (m) => lines.push(m),
+    });
+    expect(lines.join("\n")).toContain("air guitar");
+  });
+
   it("stops at the wanted count and records duplicates as rejections", async () => {
     // The model repeats itself; only the first copy can be accepted.
     const res = await generateBatch(sayLessCards, cfg(), 3, {

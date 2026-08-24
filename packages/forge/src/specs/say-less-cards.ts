@@ -178,4 +178,16 @@ export const sayLessCards: ContentSpec<Card> = {
   key(card) {
     return normalize(card.secret);
   },
+
+  /** The whole card, as a reviewer needs to see it. */
+  preview(card) {
+    const rows = [
+      `  secret     ${card.secret}${card.aliases.length > 0 ? `  (aka ${card.aliases.join(", ")})` : ""}`,
+      `  category   ${card.category}`,
+      `  forbidden  ${card.forbidden.join(" · ")}`,
+      `  budget     ${card.budget} word${card.budget === 1 ? "" : "s"}   difficulty ${card.difficulty}/4`,
+    ];
+    if (card.revealLine !== undefined) rows.push(`  reveal     "${card.revealLine}"`);
+    return rows.join("\n");
+  },
 };

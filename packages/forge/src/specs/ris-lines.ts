@@ -77,5 +77,9 @@ export function risLines(cue: Cue): ContentSpec<RisLine> {
     key(line) {
       return normalize(line.text);
     },
+
+    preview(line) {
+      return `  ${line.cue}: "${line.text}"`;
+    },
   };
 }

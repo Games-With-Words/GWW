@@ -391,7 +391,10 @@ export async function generateBatch<T>(
     accepted.push(r.item);
     // Persist NOW. A long run must survive a Ctrl-C without losing work.
     opts.onAccept?.(r.item);
-    log(`  [${attempt}] accepted: ${key}  (${accepted.length}/${want})`);
+    // Show the WHOLE item, not just its key — the operator is reviewing
+    // content as it lands, and a key tells them nothing about quality.
+    log(`  [${attempt}] accepted (${accepted.length}/${want}):`);
+    log(spec.preview !== undefined ? spec.preview(r.item) : `  ${key}`);
   }
   return { accepted, rejected };
 }
