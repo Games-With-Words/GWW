@@ -17,6 +17,13 @@ export interface ForgeConfig {
   model: string;
   /** Sampling temperature — high, because variety is the whole point. */
   temperature: number;
+  /**
+   * Generation ceiling. Omitting max_tokens is NOT unlimited — it hands the
+   * ceiling to the server's default, which is smaller than a thinking model
+   * needs. Muse was being cut mid-thought ("Hmm random seed ") before she ever
+   * reached her blocks. So we set it high, explicitly, and own the number.
+   */
+  maxTokens: number;
 }
 
 export function forgeConfigFromEnv(): ForgeConfig {
@@ -25,6 +32,7 @@ export function forgeConfigFromEnv(): ForgeConfig {
     apiKey: process.env["AIAS_API_KEY"],
     model: process.env["GWW_FORGE_MODEL"] ?? "muse-local:latest",
     temperature: Number(process.env["GWW_FORGE_TEMP"] ?? 1.0),
+    maxTokens: Number(process.env["GWW_FORGE_MAX_TOKENS"] ?? 16384),
   };
 }
 
@@ -157,8 +165,10 @@ export async function generateOne<T>(
             : []),
         ],
         temperature: cfg.temperature,
-        // NO max_tokens. Capping a thinking model starves the reasoning pass
-        // and the answer channel comes back empty. Learned the hard way.
+        // RAISE the ceiling, do not remove it. Removing it means the server
+        // default applies, and that default cut muse off mid-deliberation.
+        max_tokens: cfg.maxTokens,
+        num_predict: cfg.maxTokens,
       }),
     });
   } catch (err) {
