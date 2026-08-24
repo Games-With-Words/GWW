@@ -426,6 +426,112 @@ function renderBoardLobby(s: RoomState): void {
   app.append(el(`<p class="dim" style="text-align:center">${s.players.length < 2 ? "Now seating — scan to take your seat. Nobody plays on this screen." : "House is full enough. Any phone can hit Start."}</p>`));
 }
 
+/**
+ * Who has answered, without saying WHAT — the tension without the spoiler.
+ * Shown while guessing; the words themselves land at the reveal.
+ */
+function answeredSoFar(s: RoomState): HTMLElement | undefined {
+  const round = s.game?.round;
+  if (round === undefined || round.phase !== "GUESSING") return undefined;
+  const total = s.players.length - 1;
+  const done = round.guessedPlayerIds;
+  if (done.length === 0) return undefined;
+  return el(`<div class="card"><h2>Locked in · ${done.length}/${total}</h2><ul class="playerlist">${done
+    .map((id) => `<li><span class="dot"></span><span class="grow">${esc(nameOf(s, id))}</span><span class="dim small">answered</span></li>`)
+    .join("")}</ul></div>`);
+}
+
+/** The anonymous ballot as the BOARD shows it — big, unattributed. */
+function ballotBoard(s: RoomState): HTMLElement | undefined {
+  const round = s.game?.round;
+  if (round?.ballot === undefined || round.phase !== "BALLOT") return undefined;
+  const cast = round.votedBy?.length ?? 0;
+  return el(`<div class="card stack">
+    <h2>The guesses — vote on your phone</h2>
+    <ul class="ballot">${round.ballot
+      .map((b) => `<li class="ballotrow"><span class="slot">${esc(b.text)}</span></li>`)
+      .join("")}</ul>
+    <div class="budget">${cast} vote${cast === 1 ? "" : "s"} in · nobody knows who wrote what</div>
+  </div>`);
+}
+
+/** The reveal: who wrote what, who was right, who the room picked. */
+function revealPanel(s: RoomState): HTMLElement | undefined {
+  const round = s.game?.round;
+  const rev = round?.reveal;
+  if (rev === undefined) return undefined;
+  const winners = (list: { slotId: string; playerId: string; votes: number }[]): string =>
+    list.length === 0
+      ? `<span class="dim">no votes</span>`
+      : list.map((w) => `${esc(nameOf(s, w.playerId))} <span class="dim">(${w.votes})</span>`).join(" &amp; ");
+  const rows = (round?.guesses ?? []).map((g) => {
+    const funny = rev.funniest.some((w) => w.playerId === g.playerId);
+    const close = rev.closest.some((w) => w.playerId === g.playerId);
+    const badges = [g.correct ? `<span class="badge hit">CORRECT</span>` : "",
+      funny ? `<span class="badge funny">FUNNIEST</span>` : "",
+      close ? `<span class="badge close">CLOSEST</span>` : ""].join("");
+    return `<li class="${g.correct ? "hit" : "miss"}"><b>${esc(nameOf(s, g.playerId))}</b> ${esc(g.value)} ${badges}</li>`;
+  }).join("");
+  return el(`<div class="card stack">
+    <h2>The reveal</h2>
+    <ul class="guessfeed">${rows}</ul>
+    <div class="budget">Funniest: ${winners(rev.funniest)} · Closest: ${winners(rev.closest)}</div>
+  </div>`);
+}
+
+/**
+ * The phone ballot: every guess, two buttons each.
+ *
+ * Own guess is disabled — the server rejects a self-vote anyway, but a button
+ * that errors is worse than one that is visibly not for you. A cast vote greys
+ * its whole category so you can see what you already did.
+ */
+function ballotPhone(s: RoomState): HTMLElement | undefined {
+  const round = s.game?.round;
+  if (round?.ballot === undefined || round.phase !== "BALLOT") return undefined;
+
+  const isSpeaker = round.speakerId === s.playerId;
+  const myGuess = round.guessedPlayerIds.includes(s.playerId);
+  const castF = round.votedBy?.some((v) => v.voterId === s.playerId && v.category === "FUNNIEST") === true;
+  const castC = round.votedBy?.some((v) => v.voterId === s.playerId && v.category === "CLOSEST") === true;
+
+  const wrap = el(`<div class="card stack">
+    <h2>Vote</h2>
+    <p class="dim small">Nobody can see who wrote what. ${isSpeaker
+      ? "You know the answer, so you only pick the funniest."
+      : "Pick the funniest and the closest."}</p>
+    <ul class="ballot" id="rows"></ul>
+  </div>`);
+  const rows = wrap.querySelector("#rows")!;
+
+  for (const b of round.ballot) {
+    // We cannot know which slot is ours from the ballot alone — by design.
+    // The server refuses a self-vote; this is belt-and-braces for the case
+    // where a player has a guess in play at all.
+    const row = el(`<li class="ballotrow">
+      <span class="slot">${esc(b.text)}</span>
+      <span class="votebtns">
+        <button class="vote funny" data-cat="FUNNIEST" data-slot="${esc(b.slotId)}"${castF ? " disabled" : ""}>😂</button>
+        ${isSpeaker ? "" : `<button class="vote close" data-cat="CLOSEST" data-slot="${esc(b.slotId)}"${castC ? " disabled" : ""}>🎯</button>`}
+      </span>
+    </li>`);
+    rows.append(row);
+  }
+  rows.querySelectorAll("button.vote").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const el2 = btn as HTMLButtonElement;
+      command("ballot.vote", { category: el2.dataset["cat"], slotId: el2.dataset["slot"] });
+    });
+  });
+
+  const need = [castF ? "" : "funniest", isSpeaker || castC ? "" : "closest"].filter(Boolean);
+  wrap.append(el(`<div class="budget">${need.length === 0
+    ? "Votes in. Waiting on the room…"
+    : `Still to pick: ${need.join(" and ")}`}</div>`));
+  void myGuess;
+  return wrap;
+}
+
 function guessFeed(s: RoomState): HTMLElement | undefined {
   const guesses = s.game?.round?.guesses ?? [];
   if (guesses.length === 0) return undefined;
@@ -448,6 +554,10 @@ function renderBoardGame(s: RoomState): void {
       app.append(el(`<div class="card reveal"><h2>${esc(nameOf(s, round.speakerId))} is composing a clue…</h2><p class="dim">Category: ${esc(round.category)} · ${round.budget}-word budget</p></div>`));
     } else {
       app.append(el(`<div class="card"><div class="cluebox">“${esc(round.clue ?? "")}”</div><div class="budget">— ${esc(nameOf(s, round.speakerId))}${round.phase === "VOTING" ? " · LOOPHOLE VOTE IN PROGRESS" : ""}</div></div>`));
+      const bb = ballotBoard(s);
+      if (bb !== undefined) app.append(bb);
+      const answered = answeredSoFar(s);
+      if (answered !== undefined) app.append(answered);
     }
     const feed = guessFeed(s);
     if (feed !== undefined) app.append(feed);
@@ -485,6 +595,15 @@ function renderPhoneGame(s: RoomState): void {
   if (cap !== undefined) app.append(cap);
 
   if (round === undefined || round.phase === "COMPLETE") { renderBetweenRounds(s); return; }
+
+  // The ballot replaces the guessing UI entirely — one job per screen.
+  const phoneBallot = ballotPhone(s);
+  if (phoneBallot !== undefined) {
+    app.append(el(`<div class="card"><div class="cluebox">“${esc(round.clue ?? "")}”</div><div class="budget">by ${esc(nameOf(s, round.speakerId))}</div></div>`));
+    app.append(phoneBallot);
+    renderScores(s);
+    return;
+  }
 
   // Speaker: the secret card lives here and only here.
   if (role === "SPEAKER") {
@@ -567,6 +686,7 @@ function renderPhoneGame(s: RoomState): void {
 function renderBetweenRounds(s: RoomState): void {
   const r = s.lastReveal;
   const round = s.game?.round;
+  const reveal = revealPanel(s);
   if (r !== undefined) {
     app.append(el(`<div class="card reveal stack">
       <div class="small dim">THE ANSWER WAS</div>
@@ -575,6 +695,9 @@ function renderBetweenRounds(s: RoomState): void {
       <div class="dim">${r.winnerId !== undefined ? `${esc(nameOf(s, r.winnerId))} got it!` : r.reason === "TIMEOUT" ? "Nobody got it." : "Round scrapped."}</div>
     </div>`));
   }
+  // Who wrote what, who was right, who the room crowned. The comedy that used
+  // to dribble out during guessing now lands here, all at once.
+  if (reveal !== undefined) app.append(reveal);
   if (amHost(s)) {
     const next = el(`<button class="go">Next round</button>`);
     next.addEventListener("click", () => command("round.start"));

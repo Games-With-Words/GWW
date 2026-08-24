@@ -15,7 +15,8 @@ export interface PublicRound {
   index: number;
   speakerId: string;
   budget: number;
-  phase: "AWAITING_CLUE" | "GUESSING" | "VOTING" | "COMPLETE";
+  /** VOTING is the suspicious-clue challenge. BALLOT is the community vote. */
+  phase: "AWAITING_CLUE" | "GUESSING" | "VOTING" | "BALLOT" | "COMPLETE";
   category: string;
   clue?: string;
   guessCount: number;
@@ -26,6 +27,23 @@ export interface PublicRound {
   endedReason?: string;
   /** Card's reveal line, public once the round completes. */
   revealLine?: string;
+  /** The ANONYMIZED ballot. Never carries a player id — that is the point. */
+  ballot?: { slotId: string; text: string }[];
+  /** Who has voted in which category, so a phone can grey out what it cast. */
+  votedBy?: { voterId: string; category: VoteCategory }[];
+  /** Present only once the round completes. Identity drops HERE. */
+  reveal?: RoundReveal;
+}
+
+export type VoteCategory = "FUNNIEST" | "CLOSEST";
+
+export interface RoundReveal {
+  secret: string;
+  /** slotId -> playerId. Arrives only at the reveal. */
+  owners: Record<string, string>;
+  correctPlayerIds: string[];
+  funniest: { slotId: string; playerId: string; votes: number }[];
+  closest: { slotId: string; playerId: string; votes: number }[];
 }
 
 export interface PublicGameState {
@@ -105,8 +123,10 @@ function captionFor(s: RoomState, ev: { type: string; [k: string]: unknown }): s
       return "Ohh, that clue broke the rules. Round over — zero points, maximum shame.";
     case "clue.flagged":
       return "Hmm. That clue smells like a loophole. The room decides.";
-    case "guess.accepted":
-      return "YES! That's it!";
+    case "ballot.opened":
+      return "Everyone's in. Nobody knows who wrote what — vote on your phones!";
+    case "round.revealed":
+      return "Hands off the phones. Let's see who wrote what.";
     case "round.completed": {
       const reason = String(ev["reason"] ?? "");
       if (reason === "TIMEOUT") return "Time! Nobody got it.";

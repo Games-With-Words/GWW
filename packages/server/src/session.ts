@@ -38,12 +38,25 @@ function publicRound(round: RoundState | undefined) {
     category: round.card.category,
     clue: round.clue,
     guessCount: round.guesses.length,
+    // WHO has answered is public — the room needs "waiting on two more".
     guessedPlayerIds: round.guesses.map((g) => g.playerId),
-    // The public guess feed — wrong guesses are half the comedy (spec §04:
-    // "the humor comes from ... misunderstanding and the group's reaction").
-    guesses: round.guesses.map((g) => ({ playerId: g.playerId, value: g.value, correct: g.correct })),
+    // WHAT they answered is NOT, until the round is over.
+    //
+    // The guess feed used to broadcast playerId + value live, because wrong
+    // guesses are half the comedy (spec §04). That is still true — but the
+    // community ballot is anonymous, and a live feed naming every author makes
+    // the anonymity pure theatre. The comedy now lands at the reveal, all at
+    // once, which is a better beat anyway.
+    guesses: round.phase === "COMPLETE"
+      ? round.guesses.map((g) => ({ playerId: g.playerId, value: g.value, correct: g.correct }))
+      : [],
     winnerId: round.winnerId,
     endedReason: round.endedReason,
+    // The ANONYMIZED ballot. ballotOwners is deliberately absent — the owner
+    // map never crosses the wire until it arrives inside `reveal`.
+    ...(round.ballot !== undefined ? { ballot: round.ballot } : {}),
+    votedBy: round.votes.map((v) => ({ voterId: v.voterId, category: v.category })),
+    ...(round.reveal !== undefined ? { reveal: round.reveal } : {}),
     // The card's reveal line goes public the moment the round completes.
     ...(round.phase === "COMPLETE" ? { revealLine: round.card.revealLine } : {}),
   };
@@ -71,6 +84,7 @@ export class GameSession {
     private now: () => number = () => Date.now(),
     private clueTimeoutMs = 45_000,
     private guessTimeoutMs = 60_000,
+    private ballotTimeoutMs = 15_000,
   ) {
     const players = [...room.players.values()].map((p) => ({
       id: p.id,
@@ -91,13 +105,33 @@ export class GameSession {
     this.deadline = undefined;
   }
 
+  /**
+   * What a expiring clock means depends on WHICH phase is running.
+   *
+   * Before the rework every timeout ended the round. Now a guessing timeout
+   * opens the ballot (the round is not over — the room still votes on what
+   * came in) and a ballot timeout closes it, counting whatever arrived.
+   */
+  private onDeadline(): void {
+    const phase = this.state.round?.phase;
+    if (phase === "GUESSING") {
+      this.apply("game", (s) => sayLess.command(s, "guessing.close", {}, this.now()));
+      return;
+    }
+    if (phase === "BALLOT") {
+      this.apply("game", (s) => sayLess.command(s, "ballot.close", {}, this.now()));
+      return;
+    }
+    this.apply("game", (s) => sayLess.command(s, "round.end", { reason: "TIMEOUT" }, this.now()));
+  }
+
   private armTimer(ms: number): void {
     this.clearTimer();
     this.deadline = this.now() + ms;
     this.timer = setTimeout(() => {
       try {
         if (this.state.status === "IN_ROUND") {
-          this.apply("game", (s) => sayLess.command(s, "round.end", { reason: "TIMEOUT" }, this.now()));
+          this.onDeadline();
         }
       } catch {
         /* round already ended between fire and handling — nothing to do */
@@ -141,14 +175,38 @@ export class GameSession {
     }
   }
 
+  /**
+   * Public projection of an EVENT.
+   *
+   * The log keeps the full event; the wire gets a redacted one. `guess.submitted`
+   * carries playerId AND value, which would hand every device the exact
+   * authorship the anonymous ballot exists to hide — a state-level redaction
+   * alone is not enough when the event stream says the same thing out loud.
+   */
+  private publicEvent(e: EngineEvent): EngineEvent | { type: string; [k: string]: unknown } {
+    if (e.type === "guess.submitted") {
+      // Who answered, not what. The text lands at the reveal, all at once.
+      return { type: e.type, roundIndex: e.roundIndex, playerId: e.playerId };
+    }
+    if (e.type === "guess.accepted") {
+      // "Somebody got it" would tell the room which ballot slot is correct
+      // before they vote on CLOSEST. Withhold until the reveal.
+      return { type: e.type, roundIndex: e.roundIndex };
+    }
+    return e;
+  }
+
   /** Append engine events to the log and broadcast them (public payloads only). */
   private record(actorId: string, events: EngineEvent[]): void {
     for (const e of events) {
       this.narrate(e);
       this.log.append(this.room.id, actorId, e.type, e, this.now());
-      this.callbacks.broadcast("event", e);
+      this.callbacks.broadcast("event", this.publicEvent(e));
       if (e.type === "round.started") this.afterRoundStarted();
       if (e.type === "clue.accepted") this.armTimer(this.guessTimeoutMs);
+      // The ballot gets its own, much shorter clock — a vote is a reflex, not
+      // a deliberation, and party games die on dead time.
+      if (e.type === "ballot.opened") this.armTimer(this.ballotTimeoutMs);
       if (e.type === "round.completed" || e.type === "game.completed") this.clearTimer();
     }
     this.callbacks.broadcast("state", this.snapshot());
@@ -202,6 +260,15 @@ export class GameSession {
       case "guess.submit": {
         const value = String(payload["value"] ?? "");
         this.apply(playerId, (s) => sayLess.command(s, "guess.submit", { playerId, value }, now));
+        return;
+      }
+      case "ballot.vote": {
+        // The voter is ALWAYS the connected player — never taken from the
+        // payload, or one phone could cast another player's ballot.
+        const category = payload["category"] === "CLOSEST" ? "CLOSEST" : "FUNNIEST";
+        const slotId = String(payload["slotId"] ?? "");
+        this.apply(playerId, (s) =>
+          sayLess.command(s, "ballot.vote", { voterId: playerId, category, slotId }, now));
         return;
       }
       case "vote.resolve": {

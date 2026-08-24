@@ -12,12 +12,15 @@ import { matchGuess, validateClue } from "./rules.js";
 import { scoreRound } from "./scoring.js";
 import { normalize } from "./normalize.js";
 import type {
+  BallotSlot,
   Card,
   EngineEvent,
   Player,
+  RoundReveal,
   RoundState,
   SessionConfig,
   SessionState,
+  VoteCategory,
 } from "./types.js";
 import { DEFAULT_CONFIG } from "./types.js";
 
@@ -102,6 +105,7 @@ export function startRound(state: SessionState): Transition {
     budget,
     phase: "AWAITING_CLUE",
     guesses: [],
+    votes: [],
   };
   const next: SessionState = {
     ...s,
@@ -194,20 +198,183 @@ export function submitGuess(state: SessionState, playerId: string, value: string
     { type: "guess.submitted", roundIndex: round.index, playerId, value },
   ];
 
-  if (!correct) {
+  if (correct) events.push({ type: "guess.accepted", roundIndex: round.index, playerId });
+
+  // A correct guess NO LONGER ends the round. Everyone gets their one guess,
+  // then the room votes. Ending early would rob the ballot of its material and
+  // hand the win to whoever types fastest — which was never the game.
+  const everyoneGuessed = withGuess.guesses.length >= state.players.length - 1;
+  if (!everyoneGuessed) {
     return { state: { ...state, round: withGuess }, events };
   }
+  return closeGuessing({ ...state, round: withGuess }, events);
+}
 
-  events.push({ type: "guess.accepted", roundIndex: round.index, playerId });
-  const ended: RoundState = { ...withGuess, phase: "COMPLETE", endedReason: "CORRECT", winnerId: playerId };
-  events.push({
-    type: "round.completed",
-    roundIndex: round.index,
-    reason: "CORRECT",
-    winnerId: playerId,
+/**
+ * Deterministic shuffle (Fisher-Yates over a seeded LCG).
+ *
+ * Submission order LEAKS IDENTITY — everyone knows who types fast. But a
+ * random shuffle would break replay, so the order is derived from the session
+ * seed and round index: unguessable to players, identical on every replay.
+ */
+export function shuffleSeeded<T>(items: T[], seed: number): T[] {
+  const out = [...items];
+  let s = (seed >>> 0) || 1;
+  const next = (): number => {
+    // Numerical Recipes LCG — small, deterministic, good enough to hide order.
+    s = (Math.imul(1664525, s) + 1013904223) >>> 0;
+    return s / 0x100000000;
+  };
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(next() * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
+}
+
+/** Who may vote in each category. The Speaker knows the secret (Mark's call). */
+export function electorate(state: SessionState, category: VoteCategory): string[] {
+  const speakerId = state.round?.speakerId;
+  // FUNNIEST: everyone, including the Speaker — they're in the room.
+  if (category === "FUNNIEST") return state.players.map((p) => p.id);
+  // CLOSEST: guessers only. A Speaker who knows the answer isn't voting, they
+  // are adjudicating, and that is not a room opinion.
+  return state.players.map((p) => p.id).filter((id) => id !== speakerId);
+}
+
+/**
+ * Guessing is over. Open the ballot, or finish immediately in a small room.
+ *
+ * Called when every guesser has answered, or when the clock runs out.
+ */
+export function closeGuessing(state: SessionState, events: EngineEvent[] = []): Transition {
+  const round = state.round;
+  if (round === undefined || round.phase !== "GUESSING") {
+    throw new EngineError("NO_ROUND", "No guessing round to close.");
+  }
+  const anyCorrect = round.guesses.some((g) => g.correct);
+  const winnerId = [...round.guesses].filter((g) => g.correct).sort((a, b) => a.at - b.at)[0]?.playerId;
+
+  // Too few players, or nothing to vote on: skip the pause entirely.
+  const canBallot =
+    state.players.length >= state.config.minPlayersForBallot && round.guesses.length >= 2;
+  if (!canBallot) {
+    return completeRound(state, round, anyCorrect, winnerId, events);
+  }
+
+  // Shuffle the GUESSES, then assign slot ids by position — so a slot id says
+  // nothing about who submitted when. Seeded per round, so replay is identical.
+  const shuffled = shuffleSeeded(
+    round.guesses.map((g) => ({ text: g.value, owner: g.playerId })),
+    state.config.seed + round.index * 7919,
+  );
+  const ballot: BallotSlot[] = shuffled.map((g, i) => ({ slotId: `slot${i}`, text: g.text }));
+  const ballotOwners: Record<string, string> = {};
+  shuffled.forEach((g, i) => { ballotOwners[`slot${i}`] = g.owner; });
+
+  const open: RoundState = {
+    ...round, phase: "BALLOT", ballot, ballotOwners,
+    ...(winnerId !== undefined ? { winnerId } : {}),
+  };
+  return {
+    state: { ...state, round: open },
+    events: [...events, { type: "ballot.opened", roundIndex: round.index, slots: ballot }],
+  };
+}
+
+/** Cast one vote. Enforces the rules players cannot see well enough to self-police. */
+export function submitVote(
+  state: SessionState,
+  voterId: string,
+  category: VoteCategory,
+  slotId: string,
+): Transition {
+  const round = requireRound(state, "BALLOT");
+  if (!electorate(state, category).includes(voterId)) {
+    throw new EngineError("NOT_ELIGIBLE", `${voterId} may not vote on ${category}.`);
+  }
+  if (round.ballot?.some((s) => s.slotId === slotId) !== true) {
+    throw new EngineError("NO_SUCH_SLOT", `No ballot slot ${slotId}.`);
+  }
+  // Self-voting is invisible to players on an anonymized ballot, so it can
+  // never be left to trust.
+  if (round.ballotOwners?.[slotId] === voterId) {
+    throw new EngineError("SELF_VOTE", "You cannot vote for your own guess.");
+  }
+  if (round.votes.some((v) => v.voterId === voterId && v.category === category)) {
+    throw new EngineError("ALREADY_VOTED", `Already voted on ${category}.`);
+  }
+
+  const votes = [...round.votes, { voterId, category, slotId }];
+  const voted: RoundState = { ...round, votes };
+  const events: EngineEvent[] = [
+    { type: "vote.submitted", roundIndex: round.index, voterId, category },
+  ];
+
+  // Per-category completion: the Speaker only ever casts one vote, so "every
+  // player cast two" would hang the phase forever.
+  const done = (["FUNNIEST", "CLOSEST"] as VoteCategory[]).every((c) =>
+    electorate(state, c).every((id) => votes.some((v) => v.voterId === id && v.category === c)),
+  );
+  if (!done) return { state: { ...state, round: voted }, events };
+  return closeBallot({ ...state, round: voted }, events);
+}
+
+/** Tally, reveal, score. Called when every vote is in or the clock expires. */
+export function closeBallot(state: SessionState, events: EngineEvent[] = []): Transition {
+  const round = state.round;
+  if (round === undefined || round.phase !== "BALLOT") {
+    throw new EngineError("NO_BALLOT", "No open ballot to close.");
+  }
+  const anyCorrect = round.guesses.some((g) => g.correct);
+  return completeRound(state, round, anyCorrect, round.winnerId,
+    [...events, { type: "ballot.closed", roundIndex: round.index }]);
+}
+
+/** Top slots in a category. Ties are SHARED — cheaper than a runoff, funnier. */
+export function tally(round: RoundState, category: VoteCategory): { slotId: string; playerId: string; votes: number }[] {
+  const counts = new Map<string, number>();
+  for (const v of round.votes) {
+    if (v.category !== category) continue;
+    counts.set(v.slotId, (counts.get(v.slotId) ?? 0) + 1);
+  }
+  if (counts.size === 0) return [];
+  const top = Math.max(...counts.values());
+  return [...counts.entries()]
+    .filter(([, n]) => n === top)
+    .map(([slotId, n]) => ({ slotId, playerId: round.ballotOwners?.[slotId] ?? "", votes: n }))
+    .sort((a, b) => a.slotId.localeCompare(b.slotId));
+}
+
+/** Build the reveal, score the round, emit. The identity map drops HERE. */
+function completeRound(
+  state: SessionState,
+  round: RoundState,
+  anyCorrect: boolean,
+  winnerId: string | undefined,
+  events: EngineEvent[],
+): Transition {
+  const reason = anyCorrect ? "CORRECT" as const : "TIMEOUT" as const;
+  const reveal: RoundReveal = {
     secret: round.card.secret,
-  });
-  return finishRound({ ...state, round: ended }, events);
+    owners: round.ballotOwners ?? {},
+    correctPlayerIds: round.guesses.filter((g) => g.correct).map((g) => g.playerId),
+    funniest: tally(round, "FUNNIEST"),
+    closest: tally(round, "CLOSEST"),
+  };
+  const ended: RoundState = {
+    ...round, phase: "COMPLETE", endedReason: reason, reveal,
+    ...(winnerId !== undefined ? { winnerId } : {}),
+  };
+  const all: EngineEvent[] = [...events,
+    { type: "round.revealed", roundIndex: round.index, reveal },
+    {
+      type: "round.completed", roundIndex: round.index, reason,
+      ...(winnerId !== undefined ? { winnerId } : {}),
+      secret: round.card.secret,
+    },
+  ];
+  return finishRound({ ...state, round: ended }, all);
 }
 
 /** Server-driven timeout or explicit host end (spec §04 core round, step 8). */
