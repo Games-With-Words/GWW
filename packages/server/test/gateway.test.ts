@@ -252,6 +252,32 @@ describe("realtime round", () => {
       expect(JSON.stringify(c.messages)).not.toContain("ballotOwners");
     }
 
+    // THE HARDER GUARANTEE: the mapping must not be RECOVERABLE from earlier
+    // traffic. The live guess feed broadcast playerId + value during GUESSING,
+    // and so did the guess.submitted EVENT — either one makes the anonymous
+    // ballot pure theatre. Grepping for "ballotOwners" would never catch that,
+    // so assert on the guess TEXT: it may appear ONLY inside round.ballot
+    // (anonymous) or round.reveal (identity intentionally dropped).
+    const texts = guessers.map((_, i) => `guess number ${i}`);
+    for (const c of [board, ...clients]) {
+      for (const m of c.messages) {
+        const copy = JSON.parse(JSON.stringify(m));
+        if (copy.data?.round !== undefined && copy.data.round !== null) {
+          delete copy.data.round.ballot;
+          delete copy.data.round.reveal;
+          delete copy.data.round.guesses;
+        }
+        // ballot.opened carries the anonymous slots; round.revealed is the
+        // reveal itself. Both are allowed to hold the texts.
+        if (copy.data?.type === "ballot.opened") delete copy.data.slots;
+        if (copy.data?.type === "round.revealed") delete copy.data.reveal;
+        for (const t of texts) expect(JSON.stringify(copy)).not.toContain(t);
+      }
+    }
+
+    // The ballot itself of course carries the texts — anonymously.
+    expect(JSON.stringify(state.data.round.ballot)).toContain("guess number 0");
+
     // A phone votes; the vote is attributed to the connected player, and the
     // ballot still gives nothing away.
     const voter = guessers[0]!;

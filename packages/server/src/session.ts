@@ -38,10 +38,18 @@ function publicRound(round: RoundState | undefined) {
     category: round.card.category,
     clue: round.clue,
     guessCount: round.guesses.length,
+    // WHO has answered is public — the room needs "waiting on two more".
     guessedPlayerIds: round.guesses.map((g) => g.playerId),
-    // The public guess feed — wrong guesses are half the comedy (spec §04:
-    // "the humor comes from ... misunderstanding and the group's reaction").
-    guesses: round.guesses.map((g) => ({ playerId: g.playerId, value: g.value, correct: g.correct })),
+    // WHAT they answered is NOT, until the round is over.
+    //
+    // The guess feed used to broadcast playerId + value live, because wrong
+    // guesses are half the comedy (spec §04). That is still true — but the
+    // community ballot is anonymous, and a live feed naming every author makes
+    // the anonymity pure theatre. The comedy now lands at the reveal, all at
+    // once, which is a better beat anyway.
+    guesses: round.phase === "COMPLETE"
+      ? round.guesses.map((g) => ({ playerId: g.playerId, value: g.value, correct: g.correct }))
+      : [],
     winnerId: round.winnerId,
     endedReason: round.endedReason,
     // The ANONYMIZED ballot. ballotOwners is deliberately absent — the owner
@@ -167,12 +175,33 @@ export class GameSession {
     }
   }
 
+  /**
+   * Public projection of an EVENT.
+   *
+   * The log keeps the full event; the wire gets a redacted one. `guess.submitted`
+   * carries playerId AND value, which would hand every device the exact
+   * authorship the anonymous ballot exists to hide — a state-level redaction
+   * alone is not enough when the event stream says the same thing out loud.
+   */
+  private publicEvent(e: EngineEvent): EngineEvent | { type: string; [k: string]: unknown } {
+    if (e.type === "guess.submitted") {
+      // Who answered, not what. The text lands at the reveal, all at once.
+      return { type: e.type, roundIndex: e.roundIndex, playerId: e.playerId };
+    }
+    if (e.type === "guess.accepted") {
+      // "Somebody got it" would tell the room which ballot slot is correct
+      // before they vote on CLOSEST. Withhold until the reveal.
+      return { type: e.type, roundIndex: e.roundIndex };
+    }
+    return e;
+  }
+
   /** Append engine events to the log and broadcast them (public payloads only). */
   private record(actorId: string, events: EngineEvent[]): void {
     for (const e of events) {
       this.narrate(e);
       this.log.append(this.room.id, actorId, e.type, e, this.now());
-      this.callbacks.broadcast("event", e);
+      this.callbacks.broadcast("event", this.publicEvent(e));
       if (e.type === "round.started") this.afterRoundStarted();
       if (e.type === "clue.accepted") this.armTimer(this.guessTimeoutMs);
       // The ballot gets its own, much shorter clock — a vote is a reflex, not
