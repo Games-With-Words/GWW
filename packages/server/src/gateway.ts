@@ -24,6 +24,7 @@ import { MemoryEventLog, type EventLog } from "./log.js";
 import { RoomError, RoomStore, type Room } from "./rooms.js";
 import { GameSession, SessionError } from "./session.js";
 import { VoiceService, voiceConfigFromEnv } from "./voice.js";
+import { glog, statusColor } from "./logger.js";
 
 interface JoinAttemptWindow {
   count: number;
@@ -137,11 +138,19 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
   }
 
   const server = createServer((req, res) => {
+    const t0 = Date.now();
+    res.on("finish", () => {
+      const path = (req.url ?? "/").split("?")[0];
+      // Asset noise stays quiet; everything meaningful gets a line.
+      if (path!.startsWith("/api/") || path === "/health" || path === "/") {
+        glog("http", `${req.method} ${path} -> ${statusColor(res.statusCode)} ${Date.now() - t0}ms`);
+      }
+    });
     void handle(req, res).catch((err) => {
       if (err instanceof RoomError) {
         json(res, 400, { error: err.code, message: err.message });
       } else {
-        console.error("[gateway] unhandled:", err);
+        glog("error", `unhandled: ${String(err)}`);
         json(res, 500, { error: "INTERNAL", message: "Something went wrong." });
       }
     });
@@ -194,6 +203,7 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
       // The creating device becomes the BOARD (desktop/TV): QR, scores, clues.
       // Nobody plays on the main screen; phones join and a random phone hosts.
       const { room, joinToken, boardToken } = rooms.create(gameId, now());
+      glog("room", `CREATED ${room.shortCode} (${room.id}) game=${gameId} — board is up, waiting for phones`);
       json(res, 201, {
         roomId: room.id,
         shortCode: room.shortCode,
@@ -223,10 +233,12 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
       const joinToken = typeof body["joinToken"] === "string" ? (body["joinToken"] as string) : undefined;
       try {
         const { player, playerToken } = rooms.join(room, displayName, now(), joinToken);
+        glog("room", `${room.shortCode} JOIN "${player.displayName}" (${player.id}) — ${room.players.size} player(s) in`);
         presence(room);
         json(res, 201, { roomId: room.id, playerToken, playerId: player.id, gameId: room.gameId });
       } catch (err) {
         if (err instanceof RoomError) {
+          glog("room", `${room.shortCode} join REFUSED (${err.code}): ${err.message}`);
           json(res, err.code === "ROOM_EXPIRED" ? 410 : 400, { error: err.code, message: err.message });
           return;
         }
@@ -265,6 +277,7 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
 
     const room = rooms.get(roomId, now());
     if (room === undefined || room.state === "EXPIRED") {
+      glog("ws", `connect REFUSED: no such room ${roomId}`);
       send(ws, "error", { error: "NO_SUCH_ROOM", message: "Room not found or expired." });
       ws.close(4404, "no such room");
       return;
@@ -274,10 +287,12 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
     const boardToken = url.searchParams.get("board");
     if (boardToken !== null) {
       if (!rooms.authenticateBoard(room, boardToken)) {
+        glog("ws", `${room.shortCode} board connect REFUSED: bad board token`);
         send(ws, "error", { error: "BAD_TOKEN", message: "Invalid board token." });
         ws.close(4401, "bad token");
         return;
       }
+      glog("ws", `${room.shortCode} BOARD connected (${(boards.get(room.id)?.size ?? 0) + 1} board socket(s))`);
       let set = boards.get(room.id);
       if (set === undefined) {
         set = new Set();
@@ -292,16 +307,18 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
       ws.on("message", () => {
         send(ws, "error", { error: "BOARD_READONLY", message: "The board watches. Phones play." });
       });
-      ws.on("close", () => { set.delete(ws); });
+      ws.on("close", () => { set.delete(ws); glog("ws", `${room.shortCode} board disconnected`); });
       return;
     }
 
     const player = rooms.authenticate(room, token);
     if (player === undefined) {
+      glog("ws", `${room.shortCode} player connect REFUSED: bad/stale token — likely an OLD CLIENT BUILD, hard-refresh the device`);
       send(ws, "error", { error: "BAD_TOKEN", message: "Invalid player token." });
       ws.close(4401, "bad token");
       return;
     }
+    glog("ws", `${room.shortCode} "${player.displayName}" socket up${player.isHost ? " (HOST)" : ""}`);
 
     const perPlayer = roomSockets(room.id);
     let set = perPlayer.get(player.id);
@@ -342,7 +359,8 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
           if (sessions.has(room.id)) throw new SessionError("ALREADY_STARTED", "Game already started.");
           if (room.players.size < 2) throw new SessionError("TOO_FEW_PLAYERS", "Need at least 2 players.");
           const seed = typeof msg["seed"] === "number" ? (msg["seed"] as number) : Math.floor(Math.random() * 2 ** 31);
-          rooms.assignRandomHost(room);
+          const chosen = rooms.assignRandomHost(room);
+          glog("game", `${room.shortCode} STARTED by "${player.displayName}" — random host: "${chosen?.displayName ?? "?"}", seed=${seed}, ${room.players.size} players`);
           room.state = "PLAYING";
           const s = new GameSession(
             room,
@@ -374,6 +392,7 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
         send(ws, "error", { error: "UNKNOWN_TYPE", message: `Unknown message type.` });
       } catch (err) {
         const e = err as { code?: string; message?: string };
+        glog("game", `${room.shortCode} "${player.displayName}" command refused (${e.code ?? "COMMAND_FAILED"}): ${e.message ?? ""}`);
         send(ws, "error", { error: e.code ?? "COMMAND_FAILED", message: e.message ?? "Command failed." });
       }
     });
@@ -382,6 +401,7 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
       set.delete(ws);
       if (set.size === 0) {
         player.connected = false;
+        glog("ws", `${room.shortCode} "${player.displayName}" disconnected`);
         presence(room);
       }
     });

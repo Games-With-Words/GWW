@@ -21,6 +21,11 @@ import {
   type RoomState,
 } from "./state.js";
 
+declare const __BUILD__: string;
+// A stale cached bundle cost us a debugging session — the build now announces
+// itself so "which version am I actually running?" is a one-glance question.
+console.log(`%cGames With Words · client build ${__BUILD__}`, "color:#ffd166;font-weight:bold");
+
 const app = document.getElementById("app")!;
 
 type Screen =
@@ -141,7 +146,7 @@ function render(): void {
     case "join": renderJoin(screen.code, screen.token); break;
     case "room": renderRoom(); break;
   }
-  app.append(el(`<footer>Games With Words · Interchained LLC Labs · <span class="dim">the room is the game</span> · <a href="https://github.com/Games-With-Words/GWW" target="_blank" rel="noopener noreferrer">GPLv3</a></footer>`));
+  app.append(el(`<footer>Games With Words · Interchained LLC Labs · <span class="dim">the room is the game</span> · <a href="https://github.com/Games-With-Words/GWW" target="_blank" rel="noopener noreferrer">GPLv3</a> · <span class="dim">build ${__BUILD__}</span></footer>`));
   syncTicker();
 }
 
