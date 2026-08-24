@@ -237,6 +237,10 @@ export class VoiceService {
           { role: "user", content: `Write tonight's opening line. Random seed: ${Math.floor(this.now() / 1000)}.` },
         ],
         temperature: 1.0,
+        // muse-local is a thinking model under ollama: it put the WHOLE output
+        // in message.thinking and returned content:"" (seen live). Ask it not
+        // to think — a one-line party quip needs vibes, not deliberation.
+        think: false,
         // Thinking models spend tokens reasoning BEFORE the answer — 80 was
         // fully consumed by the preamble and content came back empty (seen
         // live: "rejected muse output (0 chars)"). Give the line room.
@@ -247,9 +251,16 @@ export class VoiceService {
     const chat = (await chatRes.json()) as {
       choices?: { message?: { content?: string; reasoning_content?: string }; text?: string }[];
     };
-    const msg = chat.choices?.[0];
+    const msg = chat.choices?.[0] as
+      | { message?: { content?: string; reasoning_content?: string; thinking?: string }; text?: string }
+      | undefined;
     // Some model servers put the answer in nonstandard fields — take any of them.
-    const raw = msg?.message?.content ?? msg?.text ?? msg?.message?.reasoning_content ?? "";
+    // Last resort: the tail of the thinking stream, which validateLine will
+    // judge like any other candidate.
+    let raw = msg?.message?.content ?? "";
+    if (raw.length === 0) raw = msg?.text ?? "";
+    if (raw.length === 0) raw = msg?.message?.reasoning_content ?? "";
+    if (raw.length === 0) raw = msg?.message?.thinking ?? "";
     // Every muse response hits the log while we tune the pipeline — Mark's
     // call: the raw body is the ground truth, show it.
     console.log(`[voice] muse response (${cue}): ${JSON.stringify(chat).slice(0, 600)}`);
