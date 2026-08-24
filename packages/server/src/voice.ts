@@ -342,6 +342,14 @@ export class VoiceService {
       const r = await this.replenishOnce();
       if (r.status === "ok") {
         this.failStreak = 0;
+        // Warm-up sprint: until EVERY cue has at least one voiced line, keep
+        // rendering every 15s (budget still rules). Ris has a show tonight —
+        // she can't learn one cue per 144 minutes.
+        const empty = CUES.filter((c) => !this.manifest.entries.some((e) => (e.cue ?? "intro") === c));
+        if (empty.length > 0 && this.generatedToday() < this.cfg.dailyMax) {
+          console.log(`[voice] warm-up: ${empty.length} cue(s) still silent (${empty.join(", ")}) — next render in 15s`);
+          setTimeout(() => void this.replenishLogged(), 15_000).unref?.();
+        }
         return;
       }
       console.log(`[voice] replenish: ${r.status}${r.cue !== undefined ? ` (cue: ${r.cue})` : ""}`);
