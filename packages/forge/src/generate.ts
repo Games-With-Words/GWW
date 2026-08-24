@@ -8,7 +8,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { extractBlock, jsonFromResponse } from "sentinel-blocks";
+import { extractBlocks, jsonFromResponse, repairJson } from "sentinel-blocks";
 import { systemPrompt, type ContentSpec, type GateResult } from "./spec.js";
 
 export interface ForgeConfig {
@@ -37,6 +37,7 @@ export type Failure =
   | { kind: "http"; status: number }
   | { kind: "truncated" }
   | { kind: "no_block" }
+  | { kind: "unterminated" }
   | { kind: "unparseable"; detail: string }
   | { kind: "gated"; reason: string }
   | { kind: "duplicate"; key: string }
@@ -45,31 +46,90 @@ export type Failure =
 export type Attempt<T> = { ok: true; item: T } | { ok: false; failure: Failure; raw?: string };
 
 /**
- * Pull the payload out of a completion. Answer channel first, thinking channel
- * second — thinking models routinely close the block inside their reasoning.
- * A truncated completion cannot have closed a block, so it is rejected outright
- * rather than parsed as a fragment.
+ * Pull the payload out of a completion.
+ *
+ * The request is NOT streamed — we already hold the model's whole completion
+ * before this runs. What matters here is WHICH block to read.
+ *
+ * Learned live: muse emitted a skeleton block containing just "{" and then the
+ * real card in a second block. Reading the FIRST block got the skeleton and a
+ * useless "Expected property name at position 2". The prompt asks for the
+ * block LAST, so we read the last complete block that passes the gate, and
+ * work backwards from there. Still zero guessing — every candidate is
+ * sentinel-delimited, we just honour the instruction we gave.
  */
 export function payloadFromCompletion<T>(
   spec: ContentSpec<T>,
   content: string,
   thinking: string,
 ): GateResult<T> | { ok: false; reason: string } {
+  const open = `<<<${spec.tag}>>>`;
+  let sawOpen = false;
+  let lastReason = "no_block";
+
   for (const channel of [content, thinking]) {
     if (channel.length === 0) continue;
-    const block = extractBlock(channel, spec.tag);
-    if (block === null) continue;
-    if (spec.payload === "text") return spec.gate(block);
-    try {
-      // The block is already isolated; jsonFromResponse still repairs fences
-      // and trailing commas, which local models sprinkle in.
-      return spec.gate(jsonFromResponse(block));
-    } catch (err) {
-      return { ok: false, reason: `unparseable json: ${err instanceof Error ? err.message : String(err)}` };
+    if (channel.includes(open)) sawOpen = true;
+    const blocks = extractBlocks(channel, spec.tag);
+    // Last first: the finished answer is the one it closed last.
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const block = blocks[i]!;
+      if (spec.payload === "text") {
+        const r = spec.gate(block);
+        if (r.ok) return r;
+        lastReason = r.reason;
+        continue;
+      }
+      const parsed = parseLoosely(block);
+      if (parsed === undefined) {
+        lastReason = `unparseable json in block: ${JSON.stringify(block.slice(0, 120))}`;
+        continue;
+      }
+      const r = spec.gate(parsed);
+      if (r.ok) return r;
+      lastReason = r.reason;
     }
   }
-  return { ok: false, reason: "no_block" };
+  // An opened-but-never-closed block is its own diagnosis: the model was still
+  // writing, or stopped early. Distinguishing it from "never tried" matters.
+  if (sawOpen && lastReason === "no_block") return { ok: false, reason: "unterminated" };
+  return { ok: false, reason: lastReason };
 }
+
+/**
+ * JSON as local models actually write it. Strict parse first, then the
+ * library's fence/trailing-comma repair, then the two sins it doesn't cover:
+ * comments and unquoted keys. Every step is deterministic — nothing is
+ * invented, and a payload that survives none of them is rejected.
+ */
+export function parseLoosely(block: string): unknown | undefined {
+  const attempts = [
+    block,
+    repairJson(block),
+    stripComments(repairJson(block)),
+    quoteBareKeys(stripComments(repairJson(block))),
+  ];
+  for (const a of attempts) {
+    try {
+      return JSON.parse(a) as unknown;
+    } catch {
+      // try the next repair
+    }
+  }
+  // Last resort: the library's full pipeline, which can slice a balanced
+  // object out of surrounding prose.
+  try {
+    return jsonFromResponse(block);
+  } catch {
+    return undefined;
+  }
+}
+
+const stripComments = (s: string): string =>
+  s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'\w])\/\/[^\n]*/g, "$1");
+
+const quoteBareKeys = (s: string): string =>
+  s.replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3');
 
 /** One generation attempt. No token cap — the model thinks as long as it needs. */
 export async function generateOne<T>(
@@ -119,6 +179,7 @@ export async function generateOne<T>(
 
   const raw = content.length > 0 ? content : thinking;
   if (verdict.reason === "no_block") return { ok: false, failure: { kind: "no_block" }, raw };
+  if (verdict.reason === "unterminated") return { ok: false, failure: { kind: "unterminated" }, raw };
   if (verdict.reason.startsWith("unparseable json")) {
     return { ok: false, failure: { kind: "unparseable", detail: verdict.reason }, raw };
   }
@@ -161,6 +222,12 @@ export async function generateBatch<T>(
     if (!r.ok) {
       rejected.push({ attempt, failure: r.failure, ...(r.raw !== undefined ? { raw: r.raw } : {}) });
       log(`  [${attempt}] rejected: ${describe(r.failure)}`);
+      // For these three the raw text IS the diagnosis — print it NOW, not in a
+      // summary the operator may never reach. Ctrl-C cost us a round trip.
+      const shape = r.failure.kind;
+      if (r.raw !== undefined && (shape === "no_block" || shape === "unterminated" || shape === "unparseable")) {
+        log(`       raw tail: ${JSON.stringify(r.raw.slice(-400))}`);
+      }
       continue;
     }
     const key = spec.key(r.item);
@@ -181,6 +248,7 @@ export function describe(f: Failure): string {
     case "http": return `HTTP ${f.status}`;
     case "truncated": return "truncated (finish_reason=length) — check the upstream token limit";
     case "no_block": return "no sentinel block closed";
+    case "unterminated": return `opened <<<TAG>>> but never closed it — the model stopped mid-block`;
     case "unparseable": return f.detail;
     case "gated": return `gate: ${f.reason}`;
     case "duplicate": return `duplicate ${f.key}`;

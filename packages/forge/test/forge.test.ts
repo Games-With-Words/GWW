@@ -153,6 +153,42 @@ describe("sentinel extraction", () => {
     if (!r.ok) expect(r.reason).toBe("no_block");
   });
 
+  it("reads the LAST complete block — muse emitted a skeleton before the real card", () => {
+    // The exact live failure: block one held "{", so reading the FIRST block
+    // gave "Expected property name or '}' at position 2".
+    const text = `<<<CARD>>>\n{\n<<<END>>>\nlet me try that again properly.\n<<<CARD>>>\n${JSON.stringify(goodCard)}\n<<<END>>>`;
+    const r = payloadFromCompletion(sayLessCards, text, "");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.item.secret).toBe("Air guitar");
+  });
+
+  it("names an unterminated block instead of blaming the JSON", () => {
+    const r = payloadFromCompletion(sayLessCards, `<<<CARD>>>\n{ "secret": "Air guitar"`, "");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("unterminated");
+  });
+
+  it("falls through to the thinking channel when the content block is junk", () => {
+    const good = `<<<CARD>>>\n${JSON.stringify(goodCard)}\n<<<END>>>`;
+    const r = payloadFromCompletion(sayLessCards, "<<<CARD>>>\n{\n<<<END>>>", good);
+    expect(r.ok).toBe(true);
+  });
+
+  it("forgives the JSON sins local models actually commit", () => {
+    const sins = [
+      // unquoted keys
+      `{ secret: "Air guitar", aliases: [], category: "Music", forbidden: ["instrument","pretend","rock"], budget: 3, difficulty: 3 }`,
+      // line comment
+      `{\n  // the card\n  "secret": "Air guitar", "aliases": [], "category": "Music",\n  "forbidden": ["instrument","pretend","rock"], "budget": 3, "difficulty": 3\n}`,
+      // trailing comma + fence
+      "```json\n{ \"secret\": \"Air guitar\", \"aliases\": [], \"category\": \"Music\", \"forbidden\": [\"instrument\",\"pretend\",\"rock\"], \"budget\": 3, \"difficulty\": 3, }\n```",
+    ];
+    for (const sin of sins) {
+      const r = payloadFromCompletion(sayLessCards, `<<<CARD>>>\n${sin}\n<<<END>>>`, "");
+      expect(r.ok, sin.slice(0, 40)).toBe(true);
+    }
+  });
+
   it("survives a code-fenced block — local models sprinkle those in", () => {
     const text = "<<<CARD>>>\n```json\n" + JSON.stringify(goodCard) + "\n```\n<<<END>>>";
     expect(payloadFromCompletion(sayLessCards, text, "").ok).toBe(true);

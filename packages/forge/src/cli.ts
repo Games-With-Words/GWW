@@ -32,6 +32,29 @@ function resolveSpec(argv: string[]): { spec: ContentSpec<unknown>; rest: string
 
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
+
+  if (argv[0] === "models") {
+    // Which line-writers does PIN actually serve? Beats guessing a tag.
+    const cfg = forgeConfigFromEnv();
+    if (cfg.apiKey === undefined || cfg.apiKey.length === 0) {
+      console.error("AIAS_API_KEY is not set.");
+      return 1;
+    }
+    const res = await fetch(`${cfg.aiasUrl}/api/v1/pin/models`, {
+      headers: { authorization: `Bearer ${cfg.apiKey}` },
+    });
+    if (!res.ok) {
+      console.error(`PIN returned HTTP ${res.status} for /models`);
+      return 1;
+    }
+    const body = (await res.json()) as { data?: { id?: string }[]; models?: { name?: string }[] };
+    const ids = (body.data ?? []).map((m) => m.id).concat((body.models ?? []).map((m) => m.name));
+    const found = ids.filter((i): i is string => typeof i === "string").sort();
+    console.log(found.length > 0 ? found.join("\n") : JSON.stringify(body).slice(0, 800));
+    console.log(`\ncurrent: GWW_FORGE_MODEL=${cfg.model}`);
+    return 0;
+  }
+
   if (argv.length === 0 || argv[0] === "list") {
     console.log("specs:");
     console.log(`  say-less-cards           (${readPackItems(sayLessCards.id).length} in packs)`);
@@ -39,7 +62,8 @@ async function main(): Promise<number> {
       const s = risLines(cue);
       console.log(`  ris-lines ${cue.padEnd(8)}       (${readPackItems(s.id).length} in packs)`);
     }
-    console.log("\nusage: gww-forge <spec> [cue] <count>");
+    console.log("\nusage: node dist/cli.js <spec> [cue] <count>");
+    console.log("       node dist/cli.js models     # what PIN serves");
     return 0;
   }
 

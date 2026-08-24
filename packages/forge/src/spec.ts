@@ -51,8 +51,9 @@ export interface ContentSpec<T> {
  */
 export function sentinelLesson(tag: string, shape: string, payload: "json" | "text"): string {
   const body = payload === "json"
-    ? "Between the markers: the JSON object and nothing else. No markdown fences, " +
-      "no comments, no trailing prose."
+    ? "Between the markers: ONE complete JSON object and nothing else. Strict " +
+      "JSON — every key double-quoted, no comments, no trailing commas, no " +
+      "markdown fences, no prose."
     : "Between the markers: only the finished text. No quotes, no label, no " +
       "alternatives, no notes.";
   return [
@@ -74,6 +75,9 @@ export function sentinelLesson(tag: string, shape: string, payload: "json" | "te
     `2. ${body}`,
     "3. Both markers sit alone on their own lines, spelled exactly as shown.",
     "4. Anything outside the block is discarded — deliberate freely above it.",
+    "5. Write the block only when it is COMPLETE. Do not open the markers and",
+    "   then think — an unclosed or half-written block is thrown away. Finish",
+    "   deciding first, then write the whole thing at once.",
   ].join("\n");
 }
 
