@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  One page, honestly declared.
+  A FALLBACK, not the live sitemap.
 
-  This is a single-surface app: the arcade IS the site. Listing invented URLs to
-  pad a sitemap is how you teach a crawler to distrust the file, and room URLs
-  are deliberately absent — they are token-bearing and expire in four hours.
+  In production the server GENERATES /sitemap.xml, because the blog's URL set
+  changes as posts publish and a hand-edited sitemap goes stale the first time
+  nobody remembers to edit it. That route sits above the static handler, so this
+  file is what remains for anyone hosting the client bundle on its own.
+
+  Room URLs are deliberately absent either way — they are token-bearing and
+  expire in four hours.
 -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>

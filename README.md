@@ -33,7 +33,7 @@ lobbies, realtime sync, persistence, and voice; games own rules.
 | `@gww/say-less` | Say Less — deterministic rules engine, tokenization policy, scoring, state machine, L0 starter deck. |
 | `@gww/ghostwriter` | Ghost Writer — everyone answers the prompt except one player, who never saw it. |
 | `@gww/example-game` | Odd One Out — the smallest complete game. Copy this to start your own. |
-| `@gww/server` | Lobbies, realtime gateway, the generic session runner, Ris's voice. |
+| `@gww/server` | Lobbies, realtime gateway, the generic session runner, Ris's voice, the blog. |
 | `@gww/client` | The board and the phones. Per-game views in `src/games/`. |
 | `@gww/forge` | Content pipeline: generates and freezes validated packs. |
 
@@ -71,6 +71,46 @@ the house rules for you.
   the party retains final authority.
 - **Private means access-controlled.** Invite-only lobbies, bounded retention,
   no public matchmaking, no stranger discovery.
+
+## The blog
+
+`/blog` is server-rendered HTML — the prose is in the response body, so a crawler
+gets the article without executing a line of JavaScript. Each post carries its own
+title, description, canonical, OG card and `BlogPosting` JSON-LD; `/sitemap.xml`
+and `/feed.xml` are generated from the published set. Posts live as one JSON file
+each under `GWW_BLOG_DIR` — data, not source, and gitignored.
+
+Muse drafts posts on a timer. Autopublish is ON, and three independent gates are
+what make that safe: a quality check (length, structure, subject, model tells), a
+novelty check (duplicate slug, near-identical title), and a cadence — a daily cap,
+a minimum gap, random jitter and quiet hours. The interval is how often we *think*
+about publishing; the cadence is how often anything actually lands.
+
+| Knob | Default | What it does |
+|------|---------|--------------|
+| `GWW_BLOG_ENABLED` | `1` | Master switch. Off means no drafting, no publishing. |
+| `GWW_BLOG_AUTOPUBLISH` | `1` | GO LIVE. Off keeps drafts back for review. |
+| `GWW_BLOG_INTERVAL_MIN` | `60` | Minutes between attempts (floor: 5). |
+| `GWW_BLOG_DAILY_MAX` | `3` | Hard ceiling of posts published per local day. |
+| `GWW_BLOG_MIN_GAP_MIN` | `150` | Minimum minutes between two published posts. |
+| `GWW_BLOG_JITTER_MIN` | `45` | Random minutes added to that gap, re-rolled each time. |
+| `GWW_BLOG_HOUR_START` / `_END` | `8` / `23` | Local hours in which publishing is allowed. |
+| `GWW_BLOG_TOPICS` | built-in queue | `\|`-separated keyword queue. |
+| `GWW_BLOG_TONE` | plain and specific | Voice direction, handed to Muse verbatim. |
+| `GWW_BLOG_MIN_WORDS` / `_MAX_WORDS` | `500` / `1400` | Publishable length window. |
+| `GWW_BLOG_MODEL` | `muse-local:latest` | The writer. |
+| `GWW_BLOG_DIR` | `./blog-store` | Where posts live. |
+| `GWW_BLOG_ADMIN_TOKEN` | *(unset)* | Bearer token for the knobs API. **Unset closes the API.** |
+
+The same knobs turn at runtime, no restart:
+
+```bash
+curl -H "authorization: Bearer $GWW_BLOG_ADMIN_TOKEN" localhost:3301/api/blog/status
+curl -XPOST -H "authorization: Bearer $TOKEN" -d '{"on":true}'        .../api/blog/golive
+curl -XPOST -H "authorization: Bearer $TOKEN" -d '{"dailyMax":2}'     .../api/blog/knobs
+curl -XPOST -H "authorization: Bearer $TOKEN" -d '{"topic":"..."}'    .../api/blog/write
+curl -XPOST -H "authorization: Bearer $TOKEN" -d '{"slug":"..."}'     .../api/blog/publish
+```
 
 ## Development
 

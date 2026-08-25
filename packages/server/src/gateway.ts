@@ -25,6 +25,10 @@ import { MemoryEventLog, type EventLog } from "./log.js";
 import { RoomError, RoomStore, type Room } from "./rooms.js";
 import { GameSession, SessionError } from "./session.js";
 import { CUES, VoiceService, voiceConfigFromEnv, type Cue } from "./voice.js";
+import { BlogService, blogConfigFromEnv, type BlogKnobs } from "./blog/service.js";
+import { seedIfMissing } from "./blog/seed.js";
+import { renderFeed, renderIndex, renderMissing, renderPost, renderSitemap } from "./blog/render.js";
+import { isValidSlug } from "./blog/store.js";
 import { glog, statusColor } from "./logger.js";
 
 interface JoinAttemptWindow {
@@ -67,10 +71,20 @@ const MIME: Record<string, string> = {
   ".xml": "application/xml; charset=utf-8",
 };
 
-export function createGateway(opts?: { log?: EventLog; now?: () => number; clientDist?: string; voice?: VoiceService }): Gateway {
+export function createGateway(opts?: {
+  log?: EventLog;
+  now?: () => number;
+  clientDist?: string;
+  voice?: VoiceService;
+  blog?: BlogService;
+}): Gateway {
   const now = opts?.now ?? (() => Date.now());
   const log = opts?.log ?? new MemoryEventLog();
   const voice = opts?.voice ?? new VoiceService(voiceConfigFromEnv());
+  const blog = opts?.blog ?? new BlogService(blogConfigFromEnv());
+  // The hand-written floor, written once. A blog whose index says "no posts
+  // yet" is a page that teaches a crawler to come back less often.
+  seedIfMissing(blog.store, now());
   const clientDist = opts?.clientDist ?? process.env["GWW_CLIENT_DIST"];
   const rooms = new RoomStore();
   const sessions = new Map<string, GameSession>();
@@ -195,6 +209,25 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
     }
   }
 
+  /** A server-rendered page. `no-cache` on HTML so an edit is visible at once. */
+  function html(res: ServerResponse, status: number, body: string): void {
+    res.writeHead(status, {
+      "content-type": "text/html; charset=utf-8",
+      "content-length": Buffer.byteLength(body),
+      "cache-control": status === 200 ? "public, max-age=300" : "no-store",
+    });
+    res.end(body);
+  }
+
+  function xml(res: ServerResponse, body: string, type = "application/xml; charset=utf-8"): void {
+    res.writeHead(200, {
+      "content-type": type,
+      "content-length": Buffer.byteLength(body),
+      "cache-control": "public, max-age=600",
+    });
+    res.end(body);
+  }
+
   function json(res: ServerResponse, status: number, body: unknown): void {
     const data = JSON.stringify(body);
     res.writeHead(status, {
@@ -209,7 +242,10 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
     res.on("finish", () => {
       const path = (req.url ?? "/").split("?")[0];
       // Asset noise stays quiet; everything meaningful gets a line.
-      if (path!.startsWith("/api/") || path === "/health" || path === "/") {
+      if (
+        path!.startsWith("/api/") || path === "/health" || path === "/" ||
+        path!.startsWith("/blog") || path === "/sitemap.xml" || path === "/feed.xml"
+      ) {
         glog("http", `${req.method} ${path} -> ${statusColor(res.statusCode)} ${Date.now() - t0}ms`);
       }
     });
@@ -350,6 +386,127 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
         }
         throw err;
       }
+      return;
+    }
+
+    /* --------------------------------------------------------------------- *
+     * The blog.
+     *
+     * These routes sit ABOVE the SPA fallback deliberately. The fallback serves
+     * index.html for any unknown path, which would happily answer /blog with
+     * the arcade — a 200 containing a game lobby is worse than a 404, because a
+     * crawler indexes it as a duplicate of the homepage.
+     *
+     * Everything here is server-rendered HTML: the prose is in the response
+     * body, so `curl` and a crawler see the same thing a reader does.
+     * --------------------------------------------------------------------- */
+
+    if (req.method === "GET" && (path === "/blog" || path === "/blog/")) {
+      html(res, 200, renderIndex(blog.store.list()));
+      return;
+    }
+
+    const postMatch = /^\/blog\/([a-z0-9-]+)\/?$/.exec(path);
+    if (req.method === "GET" && postMatch !== null) {
+      const slug = postMatch[1]!;
+      const post = isValidSlug(slug) ? blog.store.published(slug) : undefined;
+      if (post === undefined) {
+        // A real 404 status with a real page. Soft-404s (200 + "not found")
+        // teach a crawler that every URL on the domain exists.
+        html(res, 404, renderMissing());
+        return;
+      }
+      // "Keep reading" is the newest two other posts — internal links are how a
+      // crawler discovers the rest of the blog from any single entry point.
+      const related = blog.store.list().filter((p) => p.slug !== slug).slice(0, 2);
+      html(res, 200, renderPost(post, related));
+      return;
+    }
+
+    /**
+     * sitemap.xml is now GENERATED, and this route must win over the static
+     * file of the same name in the client bundle — which it does by sitting
+     * above the static handler. The file stays on disk as the answer for anyone
+     * hosting the client without this server.
+     */
+    if (req.method === "GET" && path === "/sitemap.xml") {
+      xml(res, renderSitemap(blog.store.list()));
+      return;
+    }
+
+    if (req.method === "GET" && path === "/feed.xml") {
+      xml(res, renderFeed(blog.store.list()), "application/rss+xml; charset=utf-8");
+      return;
+    }
+
+    /* --------------------------------------------------------------------- *
+     * The knobs.
+     *
+     * Every route below requires GWW_BLOG_ADMIN_TOKEN as a bearer token, and
+     * an unset token closes the API entirely rather than opening it — the
+     * failure mode of a missing secret must never be "anyone can publish".
+     * --------------------------------------------------------------------- */
+    if (path.startsWith("/api/blog/")) {
+      if (!blog.authorized(req.headers.authorization)) {
+        json(res, 401, { error: "UNAUTHORIZED", message: "Blog controls need a bearer token." });
+        return;
+      }
+
+      if (req.method === "GET" && path === "/api/blog/status") {
+        json(res, 200, blog.status());
+        return;
+      }
+
+      if (req.method === "GET" && path === "/api/blog/posts") {
+        json(res, 200, {
+          posts: blog.store.list({ includeDrafts: true }).map((p) => ({
+            slug: p.slug, title: p.title, status: p.status, source: p.source,
+            createdAt: p.createdAt, publishedAt: p.publishedAt, topic: p.topic,
+            url: p.status === "published" ? `/blog/${p.slug}` : null,
+          })),
+        });
+        return;
+      }
+
+      // GO LIVE, and its opposite. A dedicated route because "flip autopublish"
+      // is the one knob somebody will want to reach for in a hurry.
+      if (req.method === "POST" && path === "/api/blog/golive") {
+        const body = await readBody(req);
+        const on = body["on"] === undefined ? true : body["on"] === true;
+        blog.tune({ autopublish: on, ...(on ? { enabled: true } : {}) });
+        glog("blog", `GO LIVE set to ${on}`);
+        json(res, 200, { autopublish: on, status: blog.status() });
+        return;
+      }
+
+      if (req.method === "POST" && path === "/api/blog/knobs") {
+        const body = await readBody(req);
+        const applied = blog.tune(body as Partial<BlogKnobs>);
+        json(res, 200, { applied, knobs: blog.knobs });
+        return;
+      }
+
+      // Write one now, ignoring the interval — the knob for "write about this".
+      if (req.method === "POST" && path === "/api/blog/write") {
+        const body = await readBody(req);
+        const topic = typeof body["topic"] === "string" ? (body["topic"] as string) : undefined;
+        const result = await blog.writeOnce(topic);
+        glog("blog", `manual write: ${result.status}${result.slug !== undefined ? ` /blog/${result.slug}` : ""}`);
+        json(res, 200, result);
+        return;
+      }
+
+      const publishMatch = /^\/api\/blog\/(publish|unpublish)$/.exec(path);
+      if (req.method === "POST" && publishMatch !== null) {
+        const body = await readBody(req);
+        const slug = typeof body["slug"] === "string" ? (body["slug"] as string) : "";
+        const post = publishMatch[1] === "publish" ? blog.publish(slug) : blog.store.unpublish(slug);
+        if (post === undefined) { json(res, 404, { error: "NO_SUCH_POST", slug }); return; }
+        json(res, 200, { slug: post.slug, status: post.status, url: `/blog/${post.slug}` });
+        return;
+      }
+
+      json(res, 404, { error: "NOT_FOUND", message: `No blog route ${req.method} ${path}` });
       return;
     }
 
