@@ -433,7 +433,9 @@ function render(): void {
     case "join": renderJoin(screen.code, screen.token); break;
     case "room": renderRoom(); break;
   }
-  app.append(el(`<footer>Games With Words · Interchained LLC Labs · <span class="dim">the room is the game</span> · <a href="https://github.com/Games-With-Words/GWW" target="_blank" rel="noopener noreferrer">GPLv3</a> · <span class="dim">build ${__BUILD__}</span></footer>`));
+  // The blog link lives here as well as in the crawlable shell: the shell is
+  // replaced on first render, so without this a human would never see it.
+  app.append(el(`<footer>Games With Words · Interchained LLC Labs · <span class="dim">the room is the game</span> · <a href="/blog">Blog</a> · <a href="https://github.com/Games-With-Words/GWW" target="_blank" rel="noopener noreferrer">GPLv3</a> · <span class="dim">build ${__BUILD__}</span></footer>`));
 
   if (keepId !== undefined) {
     const revived = document.getElementById(keepId) as HTMLInputElement | null;

@@ -3,3 +3,9 @@ dist/
 *.tsbuildinfo
 .DS_Store
 coverage/
+
+# Runtime content the server writes, not source: the voice cache and the blog's
+# posts. Both belong to a deployment, not to the repo — a post written on the
+# box at 3pm is data, and committing it would make every deploy a merge.
+voice-cache/
+blog-store/

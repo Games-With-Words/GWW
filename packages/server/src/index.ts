@@ -4,9 +4,16 @@ export * from "./log.js";
 export * from "./session.js";
 export * from "./gateway.js";
 export * from "./voice.js";
+export * from "./blog/service.js";
+export * from "./blog/store.js";
+export * from "./blog/render.js";
+export * from "./blog/markdown.js";
+export * from "./blog/seed.js";
 
 import { createGateway } from "./gateway.js";
 import { VoiceService, voiceConfigFromEnv } from "./voice.js";
+import { BlogService, blogConfigFromEnv } from "./blog/service.js";
+import { seedIfMissing } from "./blog/seed.js";
 import { configureDeck, deckSize } from "@gww/say-less";
 import { loadDeck } from "@gww/forge";
 
@@ -22,7 +29,12 @@ if (isMain) {
   console.log(`[deck] ${deckSize()} card(s) loaded (starter + forged packs)`);
   const voice = new VoiceService(voiceConfigFromEnv());
   voice.start();
-  const gw = createGateway({ voice });
+  // Muse writes the blog on a timer, off the gameplay path entirely. Seeded
+  // here so the floor exists before the first tick can add to it.
+  const blog = new BlogService(blogConfigFromEnv());
+  seedIfMissing(blog.store, Date.now());
+  blog.start();
+  const gw = createGateway({ voice, blog });
   void gw.listen(port, host).then((p) => {
     console.log(`[gww-server] listening on ${host}:${p}`);
   });
