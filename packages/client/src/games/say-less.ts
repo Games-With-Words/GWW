@@ -144,6 +144,25 @@ export const sayLessView: GameView = {
   gameId: "say-less",
   title: "Say Less",
 
+  /**
+   * Votes while voting, who is locked in while guessing.
+   *
+   * Moved verbatim out of main.ts's boardFurniture() when the lower third became
+   * a per-game hook — same strings, same order, same fallback to standings.
+   */
+  lowerThird(s, h) {
+    const round = s.game?.round;
+    if (round?.phase === "BALLOT") {
+      const cast = new Set((round.votedBy ?? []).map((v) => v.voterId)).size;
+      return `<span class="lt-label">VOTING</span><span>${cast} of ${s.players.length} in · nobody knows who wrote what</span>`;
+    }
+    if (round?.phase === "GUESSING" && (round.guessedPlayerIds ?? []).length > 0) {
+      const inNames = (round.guessedPlayerIds ?? []).map((id) => h.nameOf(s, id)).join(" · ");
+      return `<span class="lt-label">LOCKED IN</span><span>${h.esc(inNames)}</span>`;
+    }
+    return undefined;
+  },
+
   role(s) {
     return roleOf(s);
   },

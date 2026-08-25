@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -525,4 +525,62 @@ describe("deck assembly", () => {
     writePack(sayLessCards, fresh, "m", base);
     expect(loadDeck(base)).toHaveLength(n + 3);
   });
+});
+
+/**
+ * The COMMITTED packs, checked against the CURRENT spec.
+ *
+ * These 41 cards were forged against spec v1, whose budget scale was 1-7. v2
+ * moved the scale to 6-20 and made the field load-bearing in the engine, which
+ * silently turned every one of them into a permanently 6-word card — the exact
+ * complaint the v2 change existed to fix, preserved across most of the deck.
+ * Nothing caught it, because nothing ever read the packs back and compared them
+ * to the spec they now have to satisfy.
+ *
+ * So: read the real files on disk. A pack that predates a spec change should
+ * fail here and be migrated, not discovered in a living room.
+ */
+describe("committed packs satisfy the spec they will be played under", () => {
+  const dir = join(__dirname, "..", "..", "..", "packs", "say-less-cards");
+
+  const packs = existsSync(dir)
+    ? readdirSync(dir).filter((f) => /^pack-\d+\.json$/.test(f)).sort()
+    : [];
+
+  it("finds packs to check", () => {
+    expect(packs.length).toBeGreaterThan(0);
+  });
+
+  for (const file of packs) {
+    it(`${file}: every card is inside the current budget range`, () => {
+      const pack = JSON.parse(readFileSync(join(dir, file), "utf8")) as {
+        items: Card[];
+      };
+      const out = pack.items.filter((c) => c.budget < 6 || c.budget > 20);
+      expect(out.map((c) => `${c.secret}=${c.budget}`)).toEqual([]);
+    });
+
+    it(`${file}: every card still passes the live gate`, () => {
+      // The gate is the definition of a playable card. Re-running it over the
+      // committed content is the cheapest possible guard against a spec change
+      // that quietly orphans the deck.
+      const pack = JSON.parse(readFileSync(join(dir, file), "utf8")) as {
+        items: Card[];
+      };
+      const rejected: string[] = [];
+      for (const c of pack.items) {
+        const r = sayLessCards.gate({
+          secret: c.secret,
+          aliases: c.aliases.join("\n"),
+          category: c.category,
+          forbidden: c.forbidden.join("\n"),
+          budget: String(c.budget),
+          difficulty: String(c.difficulty),
+          ...(c.revealLine !== undefined ? { revealLine: c.revealLine } : {}),
+        });
+        if (!r.ok) rejected.push(`${c.secret}: ${r.reason}`);
+      }
+      expect(rejected).toEqual([]);
+    });
+  }
 });

@@ -63,4 +63,14 @@ export interface GameView {
 
   /** The board's between-rounds panel. Defaults to the phone's if absent. */
   boardReveal?(s: RoomState, h: ViewHelpers): HTMLElement[];
+
+  /**
+   * The board's lower-third line: HTML for the strip along the bottom.
+   *
+   * Return undefined to get the platform's standings. Use it for the thing the
+   * room is actually wondering about mid-phase — who is still writing, how many
+   * votes are in — which is game-specific by nature. Open with
+   * `<span class="lt-label">LABEL</span>` to match the broadcast look.
+   */
+  lowerThird?(s: RoomState, h: ViewHelpers): string | undefined;
 }

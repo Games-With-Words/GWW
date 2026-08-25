@@ -8,7 +8,7 @@
  */
 
 import QRCode from "qrcode";
-import { scenes, score } from "./cinema.js";
+import { scenes, score, type Crown } from "./cinema.js";
 import { api, openSocket, type CreatedRoom, type GameTile, type Socket } from "./api.js";
 import {
   amHost,
@@ -148,6 +148,42 @@ function command(name: string, payload: Record<string, unknown> = {}): void {
 
 /* -------------------------------------------------------- board cinema */
 
+/**
+ * What the room crowned, joined up for the board.
+ *
+ * The award winners arrive as slotId + playerId + votes — deliberately, since
+ * the ballot is anonymous right up until the reveal. The guess TEXT lives in
+ * the ballot, and the name lives in the player list, so the board's version of
+ * the payoff has to be assembled here from all three. Returns [] when there
+ * was no ballot (under four players it never runs), and the reveal falls back
+ * to its old shape.
+ */
+function crownsFor(s: RoomState): Crown[] {
+  const round = s.game?.round;
+  const rev = round?.reveal;
+  if (round === undefined || rev === undefined) return [];
+  const textOf = (slotId: string): string | undefined =>
+    round.ballot?.find((b) => b.slotId === slotId)?.text;
+
+  const out: Crown[] = [];
+  // `funniest`/`closest` are Say Less's crowns and are now optional on the shared
+  // RoundReveal type, since a game that has no ballot publishes neither. For any
+  // other game both are absent and this loop simply produces no crowns.
+  for (const [category, winners] of [
+    ["FUNNIEST", rev.funniest ?? []],
+    ["CLOSEST", rev.closest ?? []],
+  ] as const) {
+    for (const w of winners) {
+      const text = textOf(w.slotId);
+      // No text means no headline, and a crown with no guess on it is just a
+      // name — not worth a beat. Skip rather than show an empty slab.
+      if (text === undefined || text.length === 0) continue;
+      out.push({ category, text, who: nameOf(s, w.playerId), votes: w.votes });
+    }
+  }
+  return out;
+}
+
 let creditsRolled = false;
 function boardCinema(before: RoomState, after: RoomState, ev: { type?: string; [k: string]: unknown }): void {
   switch (ev.type) {
@@ -168,7 +204,12 @@ function boardCinema(before: RoomState, after: RoomState, ev: { type?: string; [
       const winnerId = ev["winnerId"] !== undefined ? String(ev["winnerId"]) : undefined;
       const line = after.game?.round?.revealLine;
       if (secret.length > 0) {
-        scenes.reveal(secret, line, winnerId !== undefined ? nameOf(after, winnerId) : undefined);
+        scenes.reveal(
+          secret,
+          line,
+          winnerId !== undefined ? nameOf(after, winnerId) : undefined,
+          crownsFor(after),
+        );
       }
       return;
     }
@@ -542,12 +583,63 @@ function audioNotice(s: RoomState): HTMLElement | undefined {
   return el2;
 }
 
+/**
+ * The two strips that were black bars.
+ *
+ * They used to be 4vh of pure black at the top and bottom of a 16:9 UI on a
+ * 16:9 TV — letterboxing a format nothing was cropped to. Cinema letterboxes
+ * because the source is wider than the frame; broadcast doesn't letterbox, it
+ * has a tally light and a lower third. So the best two strips of real estate on
+ * the television now carry the two facts people ask for all night: how long is
+ * left, and who is winning.
+ *
+ * It also fixes a layout problem: the scoreboard was rendered LAST, at the
+ * bottom of a scrolling column, on a screen nobody can touch to scroll.
+ * Standings are permanent furniture now.
+ */
+function boardFurniture(s: RoomState): HTMLElement[] {
+  const g = s.game!;
+  const round = g.round;
+  const live = g.status === "IN_ROUND";
+  const ms = msLeft(s, Date.now());
+  const secs = ms !== undefined ? Math.ceil(ms / 1000) : undefined;
+
+  const top = el(`<div class="tally">
+    <span class="onair${live ? " live" : ""}"><i></i>${live ? "ON AIR" : "STANDBY"}</span>
+    <span class="grow"></span>
+    <span class="tally-show">${esc(currentView().title.toUpperCase())} · ROUND ${g.roundIndex + 1} OF ${g.maxRounds}</span>
+    <span class="grow"></span>
+    ${secs !== undefined ? `<span class="clock${secs <= 10 ? " urgent" : ""}">${secs}s</span>` : `<span class="clock dim">—</span>`}
+  </div>`);
+
+  /**
+   * The lower third answers whatever the room is currently wondering about.
+   *
+   * WHAT it is wondering depends on the game, so the game supplies the line and
+   * STANDINGS is the platform's fallback. Before the multi-game split this block
+   * read say-less phase names directly, which would have shown a Ghostwriter room
+   * a scoreboard at the exact moment it needed "3 of 4 written".
+   */
+  let lower: string;
+  const fromGame = currentView().lowerThird?.(s, helpers);
+  if (fromGame !== undefined) {
+    lower = fromGame;
+  } else {
+    const board = [...s.players]
+      .map((p) => ({ name: p.displayName, n: g.scores[p.id] ?? 0 }))
+      .sort((a, b) => b.n - a.n);
+    const best = board[0]?.n ?? 0;
+    lower = `<span class="lt-label">STANDINGS</span>` + board
+      .map((r) => `<span class="lt-score${r.n === best && best > 0 ? " lead" : ""}">${esc(r.name)} <b>${r.n}</b></span>`)
+      .join("");
+  }
+  return [top, el(`<div class="lowerthird">${lower}</div>`)];
+}
+
 function renderBoardGame(s: RoomState): void {
   const g = s.game!;
   const view = currentView();
-  const clock = countdown(s);
-  app.append(el(`<div class="row"><span class="brand">${esc(view.title)}</span><span class="grow"></span><span class="dim">Round ${g.roundIndex + 1}</span></div>`));
-  if (clock !== undefined) app.append(clock);
+  for (const strip of boardFurniture(s)) app.append(strip);
   const notice = audioNotice(s);
   if (notice !== undefined) app.append(notice);
   const cap = caption(s);

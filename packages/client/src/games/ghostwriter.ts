@@ -108,6 +108,26 @@ export const ghostwriterView: GameView = {
   gameId: "ghostwriter",
   title: "Ghostwriter",
 
+  lowerThird(s, h) {
+    const round = s.game?.round;
+    if (round === undefined) return undefined;
+    if (round.phase === "ANSWERING") {
+      const done = (round.answeredPlayerIds ?? []).length;
+      const waiting = s.players.filter((p) => !(round.answeredPlayerIds ?? []).includes(p.id));
+      return `<span class="lt-label">WRITING</span><span>${done} of ${s.players.length} in${
+        waiting.length > 0 && waiting.length <= 3 ? ` · waiting on ${h.esc(waiting.map((p) => p.displayName).join(" · "))}` : ""
+      }</span>`;
+    }
+    if (round.phase === "VOTING") {
+      const cast = (round.votedPlayerIds ?? []).length;
+      return `<span class="lt-label">HUNTING</span><span>${cast} of ${s.players.length} voted · one of these was written blind</span>`;
+    }
+    if (round.phase === "LAST_WORD") {
+      return `<span class="lt-label">LAST WORD</span><span>the Ghost is naming the question they never saw</span>`;
+    }
+    return undefined;
+  },
+
   role(s) {
     if (s.isBoard) return "BOARD";
     const round = s.game?.round;

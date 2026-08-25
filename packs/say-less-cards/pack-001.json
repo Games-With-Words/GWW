@@ -1,10 +1,16 @@
 {
   "provenance": {
     "specId": "say-less-cards",
-    "specVersion": "1",
+    "specVersion": "2",
     "model": "muse-local:latest",
     "generatedAt": "2026-08-24T15:47:23.274Z",
-    "promptHash": "bb62f7cae333"
+    "promptHash": "bb62f7cae333",
+    "migrations": [
+      "budget-v1-to-v2"
+    ],
+    "migrationNotes": {
+      "budget-v1-to-v2": "budget rescaled from the v1 1-7 range to the v2 6-20 range as 12 + 2*difficulty; no other field altered"
+    }
   },
   "items": [
     {
@@ -21,7 +27,7 @@
         "metal",
         "scan"
       ],
-      "budget": 4,
+      "budget": 18,
       "difficulty": 3
     }
   ]

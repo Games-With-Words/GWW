@@ -13,8 +13,9 @@
 let ctx: AudioContext | undefined;
 let master: GainNode | undefined;
 
-const reducedMotion = (): boolean =>
-  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+/* Reduced motion is handled entirely in CSS. It used to be consulted here, to
+   cut a scene's LIFETIME short, which confused "don't move things" with "don't
+   let me read things". Motion is a style concern; the timeline is not. */
 
 function audio(): { ctx: AudioContext; master: GainNode } | undefined {
   try {
@@ -89,6 +90,15 @@ export const score = {
     tone(659.25, 0.08, 0.5, { gain: 0.2 });
     tone(783.99, 0.16, 0.7, { gain: 0.22 });
   },
+  /**
+   * A crown landing. Index 0 is FUNNIEST, 1 is CLOSEST — a perfect fifth up,
+   * so which award just landed is identifiable from the kitchen, by ear.
+   */
+  crown(i: number): void {
+    const root = i === 0 ? 146.83 : 220;
+    tone(root, 0, 0.7, { type: "sawtooth", gain: 0.2 });
+    tone(root * 4, 0.22, 0.35, { type: "triangle", gain: 0.16 });
+  },
   /** End-credits fanfare. */
   fanfare(): void {
     const seq = [392, 523.25, 659.25, 783.99, 1046.5];
@@ -104,15 +114,46 @@ function overlay(html: string, className: string, ms: number): void {
   node.className = `cine ${className}`;
   node.innerHTML = html;
   document.body.append(node);
-  const life = reducedMotion() ? Math.min(ms, 800) : ms;
+  // Reduced motion means remove the MOVEMENT, not the time to read. This was
+  // `Math.min(ms, 800)`, which handed a player who asked for less motion 0.8
+  // seconds to read the answer, the reveal line, the winner and both crowns —
+  // information the rest of the room gets five seconds for. The scene now
+  // holds for its full life either way; the CSS drops the animation instead.
   setTimeout(() => {
     node.classList.add("out");
     setTimeout(() => node.remove(), 600);
-  }, life);
+  }, ms);
 }
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
+/** One thing the room voted for, ready to be shown on the board. */
+export interface Crown {
+  category: "FUNNIEST" | "CLOSEST";
+  /** The guess itself. This is the headline — it is why anyone stands up. */
+  text: string;
+  who: string;
+  votes: number;
+}
+
+/** A name that won BOTH categories, if there is exactly one such person. */
+export function doubleWinner(crowns: Crown[]): string | undefined {
+  const funny = crowns.filter((c) => c.category === "FUNNIEST").map((c) => c.who);
+  const close = crowns.filter((c) => c.category === "CLOSEST").map((c) => c.who);
+  const both = funny.filter((n) => close.includes(n));
+  // Ties can crown several people; "TOOK BOTH" is only a moment when it is one.
+  return both.length === 1 ? both[0] : undefined;
+}
+
+export function crownHtml(c: Crown): string {
+  const side = c.category === "FUNNIEST" ? "funny" : "close";
+  return `<div class="cine-crown ${side}">
+    <div class="cine-crown-label">${c.category}</div>
+    <div class="cine-crown-text">${esc(c.text)}</div>
+    <div class="cine-crown-who">${esc(c.who)} · ${c.votes} vote${c.votes === 1 ? "" : "s"}</div>
+  </div>`;
 }
 
 export const scenes = {
@@ -127,17 +168,43 @@ export const scenes = {
     );
   },
 
-  /** Blackout → the answer, huge → the reveal line as the punchline. */
-  reveal(secret: string, line: string | undefined, winner: string | undefined): void {
+  /**
+   * Blackout → the answer, huge → who got it → WHAT THE ROOM CROWNED.
+   *
+   * That last beat did not exist. The whole room votes on which guess was
+   * funniest, and the result appeared only on each player's own phone, styled
+   * with `.budget` — the same dim grey as the word-count readout. The one
+   * moment guaranteed to get people out of a chair was a footnote on a
+   * four-inch screen while the television showed a canned line.
+   *
+   * The crowns now land ON THE BOARD, with the guess itself as the headline and
+   * the author's name under it, and they enter from OPPOSITE EDGES: funniest
+   * from the left, closest from the right. Same-direction entrances read as a
+   * list. Opposite vectors drag the room's eyes across the screen, so people
+   * physically turn their heads to follow it.
+   */
+  reveal(
+    secret: string,
+    line: string | undefined,
+    winner: string | undefined,
+    crowns: Crown[] = [],
+  ): void {
     score.sting();
     if (winner !== undefined) setTimeout(() => score.win(), 700);
+    // One stab per crown, on the beat its slab lands.
+    crowns.forEach((_, i) => {
+      setTimeout(() => score.crown(i), 1700 + i * 800);
+    });
+    const double = doubleWinner(crowns);
     overlay(
       `<div class="cine-kicker">THE ANSWER WAS</div>
        <div class="cine-word">${esc(secret.toUpperCase())}</div>
        ${line !== undefined ? `<div class="cine-line">“${esc(line)}”</div>` : ""}
-       ${winner !== undefined ? `<div class="cine-winner">${esc(winner)} takes it</div>` : `<div class="cine-winner dim">nobody got it</div>`}`,
+       ${winner !== undefined ? `<div class="cine-winner">${esc(winner)} takes it</div>` : `<div class="cine-winner dim">nobody got it</div>`}
+       ${crowns.map(crownHtml).join("")}
+       ${double !== undefined ? `<div class="cine-double">${esc(double)} TOOK BOTH</div>` : ""}`,
       "cine-reveal",
-      4200,
+      crowns.length > 0 ? 6200 : 4200,
     );
   },
 
