@@ -106,7 +106,8 @@ function revealPanel(s: RoomState, h: ViewHelpers): HTMLElement | undefined {
 
 export const ghostwriterView: GameView = {
   gameId: "ghostwriter",
-  title: "Ghostwriter",
+  // Two words so the board's marquee can wrap — see the engine manifest.
+  title: "Ghost Writer",
 
   lowerThird(s, h) {
     const round = s.game?.round;

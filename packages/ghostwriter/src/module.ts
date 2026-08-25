@@ -21,7 +21,19 @@ import type { EngineEvent, PromptCard, RoundState, SessionState } from "./types.
 
 export const GHOSTWRITER_MANIFEST: GameManifest = {
   gameId: "ghostwriter",
-  title: "Ghostwriter",
+  /**
+   * TWO WORDS, deliberately (Mark, 2026-08-25).
+   *
+   * "GHOSTWRITER" is 11 unbroken characters, and the board's title card is one
+   * line of Archivo 900 at 13vw — it rendered as "GHOSTWRI…" on the television.
+   * Measured: 1,737px of text into a 710px box. A space is the whole fix, because
+   * the marquee can then wrap; "ODD ONE OUT" is the same 11 characters and
+   * overflowed by zero.
+   *
+   * The gameId stays "ghostwriter" — it is a url-safe key that rooms, packs and
+   * the registry bind to, and it is never shown to anyone.
+   */
+  title: "Ghost Writer",
   tagline: "Everyone answers the prompt. One of you never saw it.",
   rulesVersion: "ghostwriter/1",
   credit: {

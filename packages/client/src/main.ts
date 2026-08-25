@@ -8,7 +8,7 @@
  */
 
 import QRCode from "qrcode";
-import { scenes, score, type Crown } from "./cinema.js";
+import { fitBigType, scenes, score, type Crown } from "./cinema.js";
 import { api, openSocket, type CreatedRoom, type GameTile, type Socket } from "./api.js";
 import {
   amHost,
@@ -546,7 +546,11 @@ function renderBoardLobby(s: RoomState): void {
    * and became a lie the moment there were two.
    */
   const marquee = gameId === "" ? "GAMES WITH WORDS" : currentView().title.toUpperCase();
-  app.append(el(`<div class="attract-head"><div class="cine-studio-inline">INTERCHAINED LLC LABS <span>presents</span></div><h1 class="attract-title">${esc(marquee)}</h1><p class="attract-line">${esc(ATTRACT_LINES[attractIdx]!)}</p></div>`));
+  const head = el(`<div class="attract-head"><div class="cine-studio-inline">INTERCHAINED LLC LABS <span>presents</span></div><h1 class="attract-title">${esc(marquee)}</h1><p class="attract-line">${esc(ATTRACT_LINES[attractIdx]!)}</p></div>`);
+  app.append(head);
+  // Measured after it is in the document — see fitBigType's note on why a
+  // character-count formula cannot do this job.
+  fitBigType(head);
   if (created !== undefined) {
     const url = joinUrl(location.origin, created.shortCode, created.joinToken);
     const card = el(`<div class="card stack">
