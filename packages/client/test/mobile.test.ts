@@ -48,6 +48,66 @@ describe("mobile invariants", () => {
     expect(css).toContain("#app.board .composer { position: static");
   });
 
+  it("gives a crawler real content, not an empty div", () => {
+    /**
+     * Measured against production before this landed: fetching
+     * games-with-words.com returned `<div id="app"></div>` and a bundle. No
+     * heading, no game names, not one word of copy.
+     *
+     * Google executes JavaScript, but for a new domain that is a slow
+     * best-effort second pass, and every other crawler saw nothing at all. The
+     * brand query is three of the commonest words in English — showing up for it
+     * with zero text was never going to happen.
+     */
+    const html = readFileSync(join(import.meta.dirname, "../index.html"), "utf8");
+    const shell = /<div id="app"[^>]*>([\s\S]*?)<\/div>\s*<script/.exec(html)?.[1] ?? "";
+    expect(shell.length).toBeGreaterThan(600);
+    expect(shell).toMatch(/<h1>Games With Words<\/h1>/);
+    // Both games, both makers — the arcade IS the credits screen.
+    for (const s of ["Say Less", "The Oracle", "Ghost Writer", "Vex"]) {
+      expect(shell, `crawler cannot see ${s}`).toContain(s);
+    }
+    // And a real answer for a browser with JS off.
+    expect(html).toContain("<noscript>");
+  });
+
+  it("declares the arcade in structured data", () => {
+    const html = readFileSync(join(import.meta.dirname, "../index.html"), "utf8");
+    const raw = /<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";
+    expect(raw.length).toBeGreaterThan(0);
+    // It has to PARSE. A JSON-LD block with a trailing comma is worth nothing
+    // and looks perfectly fine in review.
+    const data = JSON.parse(raw) as { "@graph": { "@type": string; name?: string; itemListElement?: unknown[] }[] };
+    const types = data["@graph"].map((n) => n["@type"]);
+    expect(types).toContain("WebSite");
+    expect(types).toContain("ItemList");
+    const list = data["@graph"].find((n) => n["@type"] === "ItemList");
+    expect(list?.itemListElement).toHaveLength(2);
+    // The name is the whole point of the exercise.
+    expect(data["@graph"][0]!.name).toBe("Games With Words");
+  });
+
+  it("ships a real robots.txt and a valid sitemap", () => {
+    /**
+     * Both used to 200 with the SPA'S HTML, because the server's static handler
+     * falls through to index.html for anything it cannot find — so a crawler
+     * asking for robots.txt got a web page, served as text/html.
+     */
+    const robots = readFileSync(join(import.meta.dirname, "../public/robots.txt"), "utf8");
+    expect(robots).not.toContain("<!DOCTYPE");
+    expect(robots).toMatch(/^User-agent:/m);
+    expect(robots).toMatch(/Sitemap: https:\/\/games-with-words\.com\/sitemap\.xml/);
+    // Room URLs carry a token and expire in hours — never worth indexing.
+    expect(robots).toMatch(/Disallow: \/api\//);
+
+    const sitemap = readFileSync(join(import.meta.dirname, "../public/sitemap.xml"), "utf8");
+    expect(sitemap).not.toContain("<!DOCTYPE html");
+    // sitemapS.org — the singular form is a real typo that silently invalidates
+    // the whole file, and I made it on the first pass.
+    expect(sitemap).toContain("http://www.sitemaps.org/schemas/sitemap/0.9");
+    expect(sitemap).toContain("<loc>https://games-with-words.com/</loc>");
+  });
+
   it("has a REAL share card, at the size scrapers expect", () => {
     /**
      * The site had no share metadata at all — a link into a group chat rendered
