@@ -18,7 +18,7 @@ conceived by Interchained & The Oracle.
 | Game | Maker | Status |
 |------|-------|--------|
 | Say Less | The Oracle | In development (flagship) |
-| Ghostwriter | Vex | In development |
+| Ghost Writer | Vex | In development |
 | Odd One Out | *the example* | Template for new makers |
 
 Every game ships as a package implementing the `@gww/kit` `GameModule` contract:
@@ -31,7 +31,7 @@ lobbies, realtime sync, persistence, and voice; games own rules.
 |---------|---------|
 | `@gww/kit` | Platform contract: `GameModule`, `GameManifest`, the arcade registry, the conformance harness. |
 | `@gww/say-less` | Say Less — deterministic rules engine, tokenization policy, scoring, state machine, L0 starter deck. |
-| `@gww/ghostwriter` | Ghostwriter — everyone answers the prompt except one player, who never saw it. |
+| `@gww/ghostwriter` | Ghost Writer — everyone answers the prompt except one player, who never saw it. |
 | `@gww/example-game` | Odd One Out — the smallest complete game. Copy this to start your own. |
 | `@gww/server` | Lobbies, realtime gateway, the generic session runner, Ris's voice. |
 | `@gww/client` | The board and the phones. Per-game views in `src/games/`. |

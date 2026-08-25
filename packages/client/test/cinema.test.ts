@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { crownHtml, doubleWinner, scenes, type Crown } from "../src/cinema.js";
+import { crownHtml, doubleWinner, fitBigType, scenes, type Crown } from "../src/cinema.js";
 
 const src = readFileSync(join(import.meta.dirname, "../src/cinema.ts"), "utf8");
 
@@ -150,6 +150,58 @@ function renderScene(run: () => void): string {
   }
   return appended.map((n) => n.innerHTML).join("\n");
 }
+
+describe("display type fits the box, whatever a game is called", () => {
+  /**
+   * REGRESSION (live playtest, 2026-08-25): the board announced a Ghostwriter
+   * round as "GHOSTWRI…". Measured in a real browser with the real fonts, the
+   * title ran 1,737px into a 710px box; "SAY LESS" measured 710px into 710px,
+   * so the type scale had been fitted to the flagship name to the pixel.
+   *
+   * Layout cannot be measured in this harness, so what is asserted is the
+   * contract that makes the layout right: wrapping is allowed, and the fitter
+   * budgets LINES (a width-only check passes happily while wrapped type breaks
+   * mid-word across four lines).
+   */
+  it("lets every display class wrap instead of overflowing its box", () => {
+    for (const cls of [".attract-title", ".cine-title", ".cine-word"]) {
+      const rule = new RegExp(`\\${cls} \\{[\\s\\S]*?\\}`).exec(css)?.[0] ?? "";
+      expect(rule, `${cls} rule not found`).not.toBe("");
+      expect(rule).toContain("overflow-wrap: break-word");
+      expect(rule).toContain("max-width: 100%");
+    }
+  });
+
+  it("budgets LINES, not just width — wrapped text never overflows width", () => {
+    const fn = /export function fitBigType[\s\S]*?\n}/.exec(src)?.[0] ?? "";
+    expect(fn).not.toBe("");
+    // Line measurement is the whole point.
+    expect(fn).toMatch(/lineHeight/);
+    expect(fn).toMatch(/getBoundingClientRect/);
+    expect(fn).toMatch(/MAX_MARQUEE_LINES/);
+    // And it must be bounded — no unbounded shrink loop on a strange layout.
+    expect(code(fn)).toMatch(/step < \d+/);
+  });
+
+  it("degrades instead of throwing when it cannot measure", () => {
+    // cinema is "a layer, never a dependency" — proven by calling it with junk.
+    expect(() => fitBigType(undefined as unknown as ParentNode)).not.toThrow();
+    expect(() => fitBigType({} as unknown as ParentNode)).not.toThrow();
+  });
+
+  it("runs AFTER the scene is in the document, and on the attract marquee", () => {
+    // scrollWidth is meaningless before layout; measuring too early is exactly
+    // how the bug shipped.
+    expect(code(src)).toMatch(/document\.body\.append\(node\);\s*[\s\S]{0,200}?fitBigType\(node\)/);
+    expect(code(main)).toMatch(/fitBigType\(head\)/);
+  });
+
+  it("never hardcodes a game name in the title card", () => {
+    const call = /scenes\.title\([^)]*\)/.exec(code(main))?.[0] ?? "";
+    expect(call).toContain("currentView()");
+    expect(call).not.toMatch(/say\s*less/i);
+  });
+});
 
 describe("the board actually receives the crowns", () => {
   it("puts the winning GUESS on the board, not just a name", () => {

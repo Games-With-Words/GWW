@@ -408,6 +408,9 @@ body.tension .onair.live i { background: var(--onfill); }
 }
 .cine-studio-inline span { color: var(--hot); margin-left: 0.6em; letter-spacing: 0.3em; }
 .attract-title {
+  /* A long name wraps before it shrinks, and never runs past its box. Single
+     words (GHOSTWRITER) cannot wrap, so cinema.ts's fitBigType scales those. */
+  max-width: 100%; overflow-wrap: break-word; text-wrap: balance;
   font-stretch: 125%; font-weight: 900;
   font-family: var(--display); font-weight: 800; margin: 0.15em 0;
   font-size: clamp(3rem, 9vw, 7rem); letter-spacing: 0.06em;
@@ -441,6 +444,7 @@ body.tension .onair.live i { background: var(--onfill); }
 @keyframes studio-in { from { opacity: 0; transform: translateY(12px); } }
 
 .cine-title {
+  max-width: 100%; overflow-wrap: break-word; text-wrap: balance;
   font-stretch: 125%; font-weight: 900;
   font-family: var(--display); font-weight: 800; margin-top: 4vh;
   font-size: clamp(3.5rem, 13vw, 11rem); letter-spacing: 0.05em;
@@ -455,6 +459,8 @@ body.tension .onair.live i { background: var(--onfill); }
 
 .cine-kicker { font-family: var(--display); letter-spacing: 0.4em; color: var(--dim); font-size: 0.9rem; }
 .cine-word {
+  /* Same treatment: a secret or a prompt can be far longer than "JURASSIC PARK". */
+  max-width: 100%; overflow-wrap: break-word; text-wrap: balance;
   font-stretch: 125%; font-weight: 900;
   font-family: var(--display); font-weight: 800; margin: 2vh 0;
   font-size: clamp(2.6rem, 10vw, 8rem); color: var(--hot);

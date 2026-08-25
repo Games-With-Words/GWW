@@ -109,11 +109,82 @@ export const score = {
 
 /* ------------------------------------------------------------- overlays */
 
+/**
+ * Fit oversized display type to its box — by LINE COUNT, not just by width.
+ *
+ * THE BUG (live playtest, 2026-08-25): the board opened a Ghostwriter round with
+ * "GHOSTWRI…". Measured in a real browser with the real fonts: the title ran
+ * 1,737px into a 710px box and `.cine`'s `overflow: hidden` ate the rest.
+ * "SAY LESS" measured 710px into 710px — the type scale had been tuned until the
+ * flagship name filled the line to the pixel, so every longer name fell off.
+ *
+ * FIX ONE was Mark's: name the game in TWO words. A space lets the marquee wrap,
+ * and wrapping alone removes the clipping entirely — verified at 0px overflow.
+ *
+ * But wrapping only moves the problem. At 13vw even "GHOST" is 790px in a 710px
+ * box, so the name broke MID-WORD across four lines: no longer clipped, still
+ * broken. And a width-based fitter cannot see that, because wrapped text never
+ * exceeds its width — the check would pass while the board looked terrible.
+ *
+ * So the budget is LINES. Shrink 8% at a time until the type sits on at most two,
+ * measured from real layout rather than computed from character counts — which
+ * cannot work here anyway: "SAY LESS" averages 0.53em per character and
+ * "GHOSTWRITER" averages 0.95em, because spaces are narrow and Archivo at
+ * weight 900 / stretch 125% makes caps very wide.
+ *
+ * Verified live at 1280px: GHOST WRITER 166px -> 128px on 2 lines, SAY LESS
+ * untouched at 166px, THE UNBELIEVABLE TRUTH -> 47px on 2 lines.
+ */
+const MAX_MARQUEE_LINES = 2;
+
+export function fitBigType(root: ParentNode): void {
+  /**
+   * Cinema is a layer, never a dependency (this file's opening line). So a
+   * fitter that cannot measure does nothing instead of throwing — a scene must
+   * still play in a headless harness, and a game must never break because the
+   * presentation could not do arithmetic.
+   */
+  if (typeof (root as { querySelectorAll?: unknown })?.querySelectorAll !== "function") return;
+  if (typeof getComputedStyle !== "function") return;
+
+  for (const el of root.querySelectorAll<HTMLElement>(".cine-title, .cine-word, .attract-title")) {
+    el.style.fontSize = "";
+    const box = el.parentElement;
+    if (box === null) continue;
+
+    const lineCount = (): number => {
+      const cs = getComputedStyle(el);
+      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
+      if (!(lh > 0)) return 1;
+      return Math.max(1, Math.round(el.getBoundingClientRect().height / lh));
+    };
+    const tooWide = (): boolean => {
+      const bs = getComputedStyle(box);
+      const inner =
+        box.getBoundingClientRect().width - parseFloat(bs.paddingLeft || "0") - parseFloat(bs.paddingRight || "0");
+      return inner > 0 && el.scrollWidth > Math.ceil(inner);
+    };
+
+    // 40 steps of 8% reaches 3% of the starting size — far past any real name,
+    // and bounded so a pathological layout cannot spin.
+    let size = parseFloat(getComputedStyle(el).fontSize);
+    for (let step = 0; step < 40; step++) {
+      if (lineCount() <= MAX_MARQUEE_LINES && !tooWide()) break;
+      size = Math.floor(size * 0.92);
+      if (size <= 24) { el.style.fontSize = "24px"; break; }
+      el.style.fontSize = `${size}px`;
+    }
+  }
+}
+
 function overlay(html: string, className: string, ms: number): void {
   const node = document.createElement("div");
   node.className = `cine ${className}`;
   node.innerHTML = html;
   document.body.append(node);
+  // Fit AFTER the node is in the document — scrollWidth is meaningless before
+  // layout, and this is the whole reason the bug shipped: nothing measured.
+  fitBigType(node);
   // Reduced motion means remove the MOVEMENT, not the time to read. This was
   // `Math.min(ms, 800)`, which handed a player who asked for less motion 0.8
   // seconds to read the answer, the reveal line, the winner and both crowns —
