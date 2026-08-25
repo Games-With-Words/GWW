@@ -196,6 +196,22 @@ describe("display type fits the box, whatever a game is called", () => {
     expect(code(main)).toMatch(/fitBigType\(head\)/);
   });
 
+  it("does not congratulate a Ghost who never played", () => {
+    /**
+     * Seen in live play: the Ghost never wrote, the engine scored the round
+     * NO_CONTEST (nothing to anybody), and the board still said "ESCAPED —
+     * walked out clean". The scoreboard read 0 next to a congratulation.
+     */
+    const gw = readFileSync(join(import.meta.dirname, "../src/games/ghostwriter.ts"), "utf8");
+    const fn = /function revealPanel[\s\S]*?\n}/.exec(gw)?.[0] ?? "";
+    expect(fn).not.toBe("");
+    expect(fn).toContain("NO_CONTEST");
+    expect(fn).toMatch(/NO CONTEST/);
+    // The escape line must be gated behind the no-contest check, not just caught.
+    const verdict = /const verdict =[\s\S]*?;/.exec(fn)?.[0] ?? "";
+    expect(verdict).toContain("noContest");
+  });
+
   it("keeps the theater horizon BEHIND the furniture", () => {
     /**
      * REGRESSION (live playtest, 2026-08-25): "theres a weird line horizontal

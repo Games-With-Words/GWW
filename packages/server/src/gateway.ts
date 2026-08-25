@@ -294,6 +294,32 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
       const body = await readBody(req);
       const displayName = typeof body["displayName"] === "string" ? (body["displayName"] as string) : "";
       const joinToken = typeof body["joinToken"] === "string" ? (body["joinToken"] as string) : undefined;
+
+      /**
+       * CLAIMING A SEAT BACK comes first.
+       *
+       * A returning player is not a new player: they already hold a seat in the
+       * running session, and a fresh join would either be refused outright
+       * (GAME_IN_PROGRESS) or hand them a brand-new id with no role, no score
+       * and no way to act. Try the reunion before the front door.
+       *
+       * Only ever succeeds for a seat nobody is currently sitting in — see
+       * RoomStore.reclaim, which is where that rule lives.
+       */
+      const back = rooms.reclaim(room, displayName, now());
+      if (back !== undefined) {
+        glog("room", `${room.shortCode} RECLAIM "${back.player.displayName}" (${back.player.id}) — welcome back, old link revoked`);
+        presence(room);
+        json(res, 201, {
+          roomId: room.id,
+          playerToken: back.playerToken,
+          playerId: back.player.id,
+          gameId: room.gameId,
+          reclaimed: true,
+        });
+        return;
+      }
+
       try {
         const { player, playerToken } = rooms.join(room, displayName, now(), joinToken);
         glog("room", `${room.shortCode} JOIN "${player.displayName}" (${player.id}) — ${room.players.size} player(s) in`);
