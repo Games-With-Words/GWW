@@ -209,6 +209,10 @@ function captionFor(s: RoomState, ev: { type: string; [k: string]: unknown }): s
         : "Not even close. Beautiful.";
     case "answer.rejected":
       return "That one would've given the game away. Say it sideways.";
+
+    // ---- platform ------------------------------------------------------
+    case "deck.shuffled":
+      return `Deck cut — ${String(ev["remaining"] ?? "the rest")} cards still in play. Nobody knows what's next.`;
     default:
       return undefined;
   }

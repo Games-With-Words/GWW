@@ -7,7 +7,7 @@
  * Replaying the same commands with the same times reproduces the same session.
  */
 
-import { mulberry32, nextCycle } from "./rotation.js";
+import { mulberry32, nextCycle, seededShuffle } from "./rotation.js";
 import { matchGuess, validateClue } from "./rules.js";
 import { scoreRound } from "./scoring.js";
 import { normalize } from "./normalize.js";
@@ -33,6 +33,32 @@ export class EngineError extends Error {
   constructor(public code: string, message: string) {
     super(message);
   }
+}
+
+/**
+ * Shuffle the deck. THE DECK WAS NEVER SHUFFLED.
+ *
+ * Found by Mark in live play (2026-08-25): "say less keeps starting on deck 1...
+ * anyone who plays twice is bored or cheating". He was exactly right, and the
+ * evidence was sitting in my own smoke output — every single run revealed the
+ * secret "Jurassic Park", because loadDeck() returns
+ * [...STARTER_DECK, ...packs] in file order and deckCursor walks 0, 1, 2.
+ *
+ * A party game that deals the same cards in the same order is a party game with
+ * exactly one playthrough in it. This is the highest-value ten lines in the
+ * package, and no test caught it: every suite asserted determinism for a FIXED
+ * seed, which a hardcoded order satisfies perfectly. Determinism was tested,
+ * variety never was.
+ *
+ * Seeded, so replay still reproduces a session exactly — the room gets a fresh
+ * shuffle per game because the server picks a fresh random seed per game, not
+ * because the engine reached for entropy it is not allowed to have.
+ *
+ * `round` distinguishes the opening shuffle from later re-shuffles so pressing
+ * the button twice cannot produce the same order twice.
+ */
+export function shuffleDeck(deck: readonly Card[], seed: number, round: number): Card[] {
+  return seededShuffle(deck, mulberry32((seed ^ 0x9e3779b9 ^ (round * 2246822519)) >>> 0));
 }
 
 function rng(state: SessionState): () => number {
@@ -63,7 +89,7 @@ export function createSession(
     status: "IDLE",
   };
   const rotation = nextCycle(players.map((p) => p.id), mulberry32(cfg.seed));
-  const state: SessionState = { ...base, rotation };
+  const state: SessionState = { ...base, deck: shuffleDeck(deck, cfg.seed, 0), rotation };
   return {
     state,
     events: [{ type: "game.started", playerIds: players.map((p) => p.id), seed: cfg.seed }],
@@ -387,6 +413,29 @@ function completeRound(
     },
   ];
   return finishRound({ ...state, round: ended }, all);
+}
+
+/**
+ * Reshuffle the cards nobody has seen yet.
+ *
+ * Only the remainder: re-dealing a card the room has already played would be a
+ * worse bug than the one this fixes. Legal between rounds only — swapping the
+ * deck under a live round would change the card in the Speaker's hand.
+ */
+export function shuffleRemaining(state: SessionState): Transition {
+  if (state.status === "IN_ROUND") {
+    throw new EngineError("ROUND_ACTIVE", "Finish the round before shuffling.");
+  }
+  const remaining = state.deck.length - state.deckCursor;
+  if (remaining <= 1) {
+    throw new EngineError("NOTHING_TO_SHUFFLE", "No unplayed cards left to shuffle.");
+  }
+  const played = state.deck.slice(0, state.deckCursor);
+  const shuffled = shuffleDeck(state.deck.slice(state.deckCursor), state.config.seed, state.roundIndex + 1);
+  return {
+    state: { ...state, deck: [...played, ...shuffled] },
+    events: [{ type: "deck.shuffled", remaining }],
+  };
 }
 
 /** Server-driven timeout or explicit host end (spec §04 core round, step 8). */

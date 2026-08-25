@@ -9,7 +9,7 @@
  * Round shape:  ANSWERING -> VOTING -> [LAST_WORD] -> COMPLETE
  */
 
-import { mulberry32, nextCycle, slotOrder } from "./rotation.js";
+import { mulberry32, nextCycle, seededShuffle, slotOrder } from "./rotation.js";
 import { framedPlayer, isCaught, matchLastWord, tallyVotes, validateAnswer } from "./rules.js";
 import { scoreRound } from "./scoring.js";
 import { normalize } from "./normalize.js";
@@ -58,7 +58,9 @@ export function createSession(
     rotation,
     rotationCursor: 0,
     cycle: 0,
-    deck,
+    // SHUFFLED. Dealing prompts in file order meant every session opened on
+    // "the most overrated tourist attraction" — see shuffleDeck().
+    deck: shuffleDeck(deck, cfg.seed, 0),
     deckCursor: 0,
     roundIndex: 0,
     scores: Object.fromEntries(players.map((p) => [p.id, 0])),
@@ -68,6 +70,47 @@ export function createSession(
   return {
     state,
     events: [{ type: "game.started", playerIds: players.map((p) => p.id), seed: cfg.seed }],
+  };
+}
+
+/**
+ * Shuffle the prompts. THE DECK WAS NEVER SHUFFLED — in either game.
+ *
+ * Mark found it in live play (2026-08-25): Say Less "keeps starting on deck 1...
+ * anyone who plays twice is bored or cheating". Ghost Writer had the identical
+ * bug, inherited by copying the reference implementation's cursor walk, and my
+ * own smoke run had been printing the same first prompt every time without me
+ * reading what it was telling me.
+ *
+ * Every test in this package asserts determinism for a fixed seed, which a
+ * hardcoded order satisfies perfectly. Determinism was tested; variety never
+ * was. A frozen deal order is invisible to exactly the tests you write to prove
+ * a deal is reproducible.
+ *
+ * Seeded so replay is still exact — the room gets a new order per game because
+ * the server picks a new seed per game.
+ */
+export function shuffleDeck(deck: readonly PromptCard[], seed: number, round: number): PromptCard[] {
+  return seededShuffle(deck, mulberry32((seed ^ 0x9e3779b9 ^ (round * 2246822519)) >>> 0));
+}
+
+/**
+ * Reshuffle the prompts nobody has seen yet. Between rounds only — swapping the
+ * deck mid-round would change the question on three phones.
+ */
+export function shuffleRemaining(state: SessionState): Transition {
+  if (state.status === "IN_ROUND") {
+    throw new EngineError("ROUND_ACTIVE", "Finish the round before shuffling.");
+  }
+  const remaining = state.deck.length - state.deckCursor;
+  if (remaining <= 1) {
+    throw new EngineError("NOTHING_TO_SHUFFLE", "No unplayed prompts left to shuffle.");
+  }
+  const played = state.deck.slice(0, state.deckCursor);
+  const shuffled = shuffleDeck(state.deck.slice(state.deckCursor), state.config.seed, state.roundIndex + 1);
+  return {
+    state: { ...state, deck: [...played, ...shuffled] },
+    events: [{ type: "deck.shuffled", remaining }],
   };
 }
 

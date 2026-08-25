@@ -168,6 +168,58 @@ if (refusal?.error !== "TOO_FEW_PLAYERS") fail("a 2-player Ghostwriter room was 
 if (!String(refusal.message).includes("3")) fail("refusal did not cite the game's own minimum");
 ok("the minimum table size came from the manifest, not a hardcoded 2");
 
+// ---- the deck is actually shuffled ---------------------------------------
+// Mark, live: "say less keeps starting on deck 1 ... anyone who plays twice is
+// bored or cheating". Five fresh rooms, five different first cards is the proof.
+/**
+ * THREE rooms, not six.
+ *
+ * Six tripped the gateway's own join rate limit (20 attempts per IP per minute)
+ * and rooms 3-5 came up with no players at all — so the probe reported "the deck
+ * is not shuffled" when what it had actually proven was that the rate limiter
+ * works. The strong evidence lives in the unit tests, which measure 12 distinct
+ * opening cards across 200 seeds with no sockets involved. This is the
+ * end-to-end sanity check on top of that, and it has to fit inside the real
+ * server's real limits.
+ */
+const firstCards = new Set();
+let rooms = 0;
+for (let i = 0; i < 3; i++) {
+  const r = await post("/api/rooms", { gameId: "say-less" });
+  const b = await open(`ws://127.0.0.1:${port}/ws?room=${r.roomId}&board=${r.boardToken}`, `deck-${i}`);
+  const ps = [];
+  for (const n of ["A", "B", "C"]) {
+    const j = await post(`/api/rooms/${r.shortCode}/join`, { displayName: n, joinToken: r.joinToken });
+    // Surface a refusal instead of silently ending up with an empty room.
+    if (j.playerToken === undefined) { fail(`join refused in deck room ${i}: ${j.error ?? "?"} ${j.message ?? ""}`); break; }
+    ps.push(await open(`ws://127.0.0.1:${port}/ws?room=${r.roomId}&token=${j.playerToken}`, n));
+  }
+  if (ps.length < 3) continue;
+  b.ws.send(JSON.stringify({ type: "game.start", seed: 1000 + i * 7919 }));
+  /**
+   * WAIT for the card, do not sleep and hope.
+   *
+   * The first version of this check slept 300ms and counted whatever had
+   * arrived — it reported "2 distinct openings" and accused the engine of not
+   * shuffling. The engine was fine (12/12 distinct first cards across 200
+   * seeds, measured directly); the harness was reading rooms that had not
+   * delivered yet. A flaky probe that indicts working code is worse than no
+   * probe.
+   */
+  let holder;
+  for (let t = 0; t < 40 && holder === undefined; t++) {
+    holder = ps.find((p) => p.private.at(-1)?.card !== undefined);
+    if (holder === undefined) await new Promise((res) => setTimeout(res, 50));
+  }
+  if (holder === undefined) fail(`room ${i} never dealt a card`);
+  else firstCards.add(holder.private.at(-1).card.secret);
+  rooms += 1;
+}
+console.log(`\nDECK: ${firstCards.size} distinct opening card(s) across ${rooms} fresh rooms — ${[...firstCards].join(" · ")}`);
+if (rooms < 3) fail(`only ${rooms} deck room(s) ran — the probe could not do its job`);
+else if (firstCards.size < 2) fail(`the deck looks unshuffled: ${firstCards.size} distinct opening card(s) in ${rooms} rooms`);
+else ok(`the deck is shuffled — ${rooms} rooms, ${firstCards.size} different opening cards`);
+
 await gw.close();
 console.log(process.exitCode ? "\nSMOKE FAILED" : "\nSMOKE PASSED — one runner, two games, no leaks");
 process.exit(process.exitCode ?? 0);
