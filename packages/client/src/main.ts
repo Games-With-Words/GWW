@@ -188,7 +188,9 @@ let creditsRolled = false;
 function boardCinema(before: RoomState, after: RoomState, ev: { type?: string; [k: string]: unknown }): void {
   switch (ev.type) {
     case "game.started":
-      scenes.title("Say Less");
+      // The show is whatever game this room is playing. Was hardcoded, and a
+      // Ghostwriter room opened by announcing SAY LESS on the television.
+      scenes.title(currentView().title);
       return;
     case "round.started":
       score.roundOpen();
@@ -218,7 +220,10 @@ function boardCinema(before: RoomState, after: RoomState, ev: { type?: string; [
       creditsRolled = true;
       const totals = (ev["totals"] ?? {}) as Record<string, number>;
       const cast = after.players.map((p) => ({ name: p.displayName, score: totals[p.id] ?? 0 }));
-      scenes.credits(cast, "SAY LESS", "The Oracle");
+      // The arcade IS the credits screen, so the maker comes from the game's
+      // own manifest. Hardcoding it credited The Oracle for every game.
+      const tile = tiles.find((t) => t.gameId === gameId);
+      scenes.credits(cast, currentView().title.toUpperCase(), tile?.credit.maker ?? "the room");
       return;
     }
   }
@@ -532,7 +537,16 @@ function renderBoardLobby(s: RoomState): void {
       if (room?.game === undefined && screen.kind === "room") render();
     }, 5000);
   }
-  app.append(el(`<div class="attract-head"><div class="cine-studio-inline">INTERCHAINED LLC LABS <span>presents</span></div><h1 class="attract-title">SAY LESS</h1><p class="attract-line">${esc(ATTRACT_LINES[attractIdx]!)}</p></div>`));
+  /**
+   * The attract screen is the FRONT DOOR — it runs before a game is chosen, so
+   * it names the arcade, not one game. When a room already picked a game, that
+   * game gets the marquee.
+   *
+   * This said SAY LESS unconditionally, which was true when there was one game
+   * and became a lie the moment there were two.
+   */
+  const marquee = gameId === "" ? "GAMES WITH WORDS" : currentView().title.toUpperCase();
+  app.append(el(`<div class="attract-head"><div class="cine-studio-inline">INTERCHAINED LLC LABS <span>presents</span></div><h1 class="attract-title">${esc(marquee)}</h1><p class="attract-line">${esc(ATTRACT_LINES[attractIdx]!)}</p></div>`));
   if (created !== undefined) {
     const url = joinUrl(location.origin, created.shortCode, created.joinToken);
     const card = el(`<div class="card stack">
