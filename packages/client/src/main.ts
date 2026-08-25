@@ -68,6 +68,21 @@ function currentView() {
   return viewFor(gameId);
 }
 
+/**
+ * Identity of the screen currently on show.
+ *
+ * Coarse on purpose: it changes when the player moves somewhere new (home to a
+ * room, lobby to a live game, into the summary) and NOT when the same screen
+ * merely refreshes. That distinction is the whole basis for deciding whether a
+ * re-render may keep the scroll position or must go back to the top.
+ */
+function viewKey(): string {
+  const phase = room?.game === undefined ? "lobby" : room.game.status;
+  return `${screen.kind}|${room?.isBoard === true ? "board" : "phone"}|${phase}`;
+}
+
+let lastViewKey = "";
+
 /* ------------------------------------------------------------------ boot */
 
 function parseHash(): void {
@@ -363,6 +378,47 @@ function render(): void {
   const keepValue = keepId !== undefined ? active!.value : "";
   const keepPos = keepId !== undefined ? active!.selectionStart ?? keepValue.length : 0;
 
+  /**
+   * And keep the SCROLL POSITION, for the same reason we keep the input.
+   *
+   * replaceChildren() empties the document, which sends the browser to the top.
+   * Every socket message re-renders — a player joining, a presence update, a
+   * state snapshot — so on the board lobby, where the QR sits below the fold,
+   * the host got yanked back up mid-scan by traffic they didn't cause.
+   *
+   * Only restored when the render is a REFRESH of the same view. Moving between
+   * screens (home -> room, lobby -> game) should absolutely start at the top,
+   * and viewKey() is what tells those two cases apart.
+   */
+  const keepScroll = window.scrollY;
+  const keepAppScroll = app.scrollTop;
+  const sameView = lastViewKey === viewKey();
+
+  /**
+   * PIN THE HEIGHT ACROSS THE REBUILD.
+   *
+   * Mark, live: "after picking a game, I scroll down to reveal the QR and the
+   * page auto scrolls me back to top".
+   *
+   * The cause is not the rebuild by itself — replaceChildren() followed by a
+   * synchronous re-append keeps the scroll fine, which I proved in a browser
+   * before believing it. The cause is a LAYOUT FLUSH taken while the page is
+   * half-built. renderBoardLobby appends the marquee, then fitBigType measures
+   * it (getBoundingClientRect), and at that instant the document contains only
+   * the header — so it is far shorter than the scroll offset and the browser
+   * clamps the scroll to the new maximum. Measured: 534px -> 157px mid-render.
+   *
+   * Chrome's scroll anchoring quietly restores it afterwards, which is why this
+   * never showed up here. Safari implements no scroll anchoring at all, so on a
+   * board that is exactly where the scroll stays — and the QR sits below the
+   * fold, so the one thing the host must do was being undone by a timer.
+   *
+   * Holding #app's height for the duration of the rebuild means the document
+   * never gets shorter, so there is nothing to clamp. Verified: 534px -> 534px.
+   */
+  const pinnedHeight = app.offsetHeight;
+  if (pinnedHeight > 0) app.style.minHeight = `${pinnedHeight}px`;
+
   app.replaceChildren();
   const boardMode = room?.isBoard === true && screen.kind === "room";
   app.classList.toggle("board", boardMode);
@@ -387,6 +443,15 @@ function render(): void {
       try { revived.setSelectionRange(keepPos, keepPos); } catch { /* number inputs etc. */ }
     }
   }
+  // Release the pin now the real content is in place, so the page can size to
+  // its own content again (and shrink when a screen legitimately gets shorter).
+  app.style.minHeight = "";
+  if (sameView && (keepScroll > 0 || keepAppScroll > 0)) {
+    // Same screen, rebuilt in place: put the room back where it was looking.
+    if (keepScroll > 0) window.scrollTo(0, keepScroll);
+    if (keepAppScroll > 0) app.scrollTop = keepAppScroll;
+  }
+  lastViewKey = viewKey();
   syncTicker();
 }
 
@@ -530,11 +595,29 @@ const ATTRACT_LINES = [
 let attractIdx = 0;
 let attractTimer: ReturnType<typeof setInterval> | undefined;
 
+/**
+ * Rotate the attract line by editing ONE text node.
+ *
+ * It used to call render(), which does app.replaceChildren() — so every five
+ * seconds the whole board was destroyed and rebuilt, and the browser reset the
+ * scroll position. Mark, live: "after picking a game, I scroll down to reveal
+ * the QR and the page auto scrolls me back to top". The QR is BELOW the fold on
+ * a laptop, so the one thing a host must do on this screen was on a five-second
+ * timer against them.
+ *
+ * Same lesson as tickClock, which already updates only the clock text for
+ * exactly this reason: a full re-render is not a cheap way to change a word.
+ */
+function tickAttract(): void {
+  attractIdx = (attractIdx + 1) % ATTRACT_LINES.length;
+  const node = document.querySelector(".attract-line");
+  if (node !== null) node.textContent = ATTRACT_LINES[attractIdx]!;
+}
+
 function renderBoardLobby(s: RoomState): void {
   if (attractTimer === undefined) {
     attractTimer = setInterval(() => {
-      attractIdx = (attractIdx + 1) % ATTRACT_LINES.length;
-      if (room?.game === undefined && screen.kind === "room") render();
+      if (room?.game === undefined && screen.kind === "room") tickAttract();
     }, 5000);
   }
   /**

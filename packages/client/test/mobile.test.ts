@@ -182,6 +182,42 @@ describe("the board's strips do real work", () => {
     expect(ts).toMatch(/STANDINGS/);
   });
 
+  it("does not lose the room's scroll position when it re-renders", () => {
+    /**
+     * REGRESSION (live playtest, 2026-08-25): "I scroll down to reveal the QR and
+     * the page auto scrolls me back to top".
+     *
+     * Measured in a browser: a layout flush taken while the page is half-built
+     * (fitBigType measuring the marquee before the QR card is appended) clamps
+     * the scroll from 534px to 157px, because the document is momentarily far
+     * shorter than the offset. Chrome's scroll anchoring hides it; Safari has no
+     * scroll anchoring, so on a board it stays where it was clamped.
+     *
+     * Three defences, all asserted here because none of them is visible in a
+     * screenshot: hold the height across the rebuild, restore the offset after,
+     * and stop rebuilding for a text change at all.
+     */
+    expect(ts).toMatch(/app\.style\.minHeight = `\$\{pinnedHeight\}px`/);
+    expect(ts).toMatch(/app\.style\.minHeight = ""/);
+    expect(ts).toMatch(/window\.scrollTo\(0, keepScroll\)/);
+    // The restore must be conditional on staying on the same screen — moving
+    // between screens should start at the top.
+    expect(ts).toMatch(/sameView\s*&&/);
+  });
+
+  it("rotates the attract line without rebuilding the page", () => {
+    // It used to call render() every five seconds, which is a full DOM rebuild
+    // to change one sentence — the same reason tickClock edits only the clock.
+    const fn = /function tickAttract[\s\S]*?\n}/.exec(ts)?.[0] ?? "";
+    expect(fn).not.toBe("");
+    expect(fn).toContain("textContent");
+    expect(fn).not.toContain("render()");
+    // And the interval must call the surgical version, not the nuke.
+    const timer = /attractTimer = setInterval\([\s\S]*?\}, 5000\)/.exec(ts)?.[0] ?? "";
+    expect(timer).toContain("tickAttract()");
+    expect(timer).not.toMatch(/\brender\(\)/);
+  });
+
   it("never hardcodes a game name in the cinema — the board announces the room's game", () => {
     /**
      * REGRESSION (live playtest, 2026-08-25): a Ghostwriter room opened with the
