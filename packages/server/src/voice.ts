@@ -331,10 +331,34 @@ const SSE_DONE = "[DONE]";
  * Written as a function over a stream rather than inside the fetch call so it can
  * be unit-tested against a fabricated stream, with no network and no model.
  */
+export interface ReadSseOptions {
+  /** Fired when we hang up early, so the caller can abort the request. */
+  onEnd?: () => void;
+  /**
+   * When the payload is COMPLETE. Defaults to the first closing marker.
+   *
+   * That default is right for a one-block payload and silently wrong for any
+   * other. The blog asks for five blocks and got exactly one: the reader saw
+   * the `<<<END>>>` of TITLE, decided the model was done, and hung up — so
+   * every tick reported "missing SLUG, DESCRIPTION, KEYWORDS, BODY" with about
+   * 67 characters of content, which is the length of a title block. The blog
+   * even carried a comment saying "no early hang-up here", because the hang-up
+   * was believed to live in the voice CALLER. It lived here, in the reader both
+   * of them import.
+   *
+   * So the stop condition belongs to whoever knows the shape of the payload.
+   */
+  isDone?: (content: string, thinking: string) => boolean;
+}
+
 export async function readSseCompletion(
   stream: ReadableStream<Uint8Array>,
-  onEnd?: () => void,
+  opts?: ReadSseOptions | (() => void),
 ): Promise<StreamedCompletion> {
+  const o: ReadSseOptions = typeof opts === "function" ? { onEnd: opts } : opts ?? {};
+  const isDone = o.isDone ?? ((c: string, t: string): boolean =>
+    c.includes("<<<END>>>") || t.includes("<<<END>>>"));
+  const onEnd = o.onEnd;
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -344,7 +368,7 @@ export async function readSseCompletion(
   let events = 0;
   let stoppedEarly = false;
 
-  const closed = (): boolean => content.includes("<<<END>>>") || thinking.includes("<<<END>>>");
+  const closed = (): boolean => isDone(content, thinking);
 
   try {
     for (;;) {

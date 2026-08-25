@@ -57,6 +57,17 @@ export interface BlogKnobs {
   minWords: number;
   /** Maximum words — a 4,000-word answer to a simple question is a model tell. */
   maxWords: number;
+  /**
+   * Generation ceiling, in tokens.
+   *
+   * Omitting this is NOT unlimited — it hands the ceiling to the server, and
+   * PIN's schema default is 1024. A 500-to-1400 word body plus four other
+   * blocks plus a reasoning pass does not fit in 1024, so the draft would come
+   * back cut mid-sentence with finish_reason "length" the moment the earlier
+   * hang-up bug stopped hiding it. This is the same lesson the forge learned:
+   * name the ceiling, out loud, in the request.
+   */
+  maxTokens: number;
 }
 
 export interface BlogConfig extends BlogKnobs {
@@ -133,6 +144,7 @@ export function blogConfigFromEnv(env: NodeJS.ProcessEnv = process.env): BlogCon
       "No hype, no listicle padding, no 'in today's fast-paced world', no em-dash-heavy throat-clearing.",
     minWords: Math.max(150, num("GWW_BLOG_MIN_WORDS", 500)),
     maxWords: Math.max(400, num("GWW_BLOG_MAX_WORDS", 1400)),
+    maxTokens: Math.max(2048, num("GWW_BLOG_MAX_TOKENS", 16384)),
   };
 }
 
@@ -499,6 +511,10 @@ export class BlogService {
             },
           ],
           temperature: 0.9,
+          max_tokens: this.cfg.maxTokens,
+          // Ollama-family servers read num_predict; sending both means the
+          // ceiling survives whichever one the backend actually honours.
+          num_predict: this.cfg.maxTokens,
           stream: true,
         }),
         signal: abort.signal,
@@ -515,10 +531,16 @@ export class BlogService {
     let finishReason: string | undefined;
     const ctype = res.headers?.get?.("content-type") ?? "";
     if (ctype.includes("text/event-stream") && res.body !== null && res.body !== undefined) {
-      // NOTE: no early hang-up here. The voice pipeline stops at the first
-      // <<<END>>> because it wants ONE block; a post is five blocks, and the
-      // first END is the end of the TITLE.
-      const streamed = await readSseCompletion(res.body);
+      // The hang-up condition has to come from HERE, because only this caller
+      // knows a post is five blocks. The reader's default is the first
+      // <<<END>>> — which is the end of the TITLE — and that is exactly what
+      // was truncating every draft to ~67 characters and reporting the other
+      // four blocks missing. A post is done when it has a usable draft, so
+      // that is the predicate: the same function that decides the question.
+      const streamed = await readSseCompletion(res.body, {
+        onEnd: () => abort.abort(),
+        isDone: (c, t) => !("missing" in findDraft(c, t)),
+      });
       content = streamed.content;
       thinking = streamed.thinking;
       finishReason = streamed.finishReason;

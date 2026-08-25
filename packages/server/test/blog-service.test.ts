@@ -463,3 +463,66 @@ describe("the prompt", () => {
     expect(prompt).toContain("500");
   });
 });
+
+/**
+ * THE LIVE FAILURE, 2026-08-25.
+ *
+ * Every tick logged "missing SLUG, DESCRIPTION, KEYWORDS, BODY (content ~67
+ * chars, thinking 0)". TITLE was never missing, because ~67 characters IS a
+ * title block: the shared SSE reader hung up on the first `<<<END>>>`, which
+ * is correct for a one-block voice line and destroys a five-block post.
+ *
+ * Behind it sat a second failure that the first one was hiding: the request
+ * carried no token ceiling at all, and omitting it is not "unlimited" — it
+ * hands the ceiling to PIN, whose schema default is 1024. A 500-to-1400 word
+ * body does not fit in that, so the draft would have come back truncated the
+ * moment the streaming stopped being cut short.
+ */
+describe("the request Muse actually receives", () => {
+  it("names a token ceiling big enough for a whole post", () => {
+    const { service, calls } = svc();
+    void service.tick();
+    const body = JSON.parse(calls[0] ?? "{}") as { max_tokens?: number; num_predict?: number };
+    expect(body.max_tokens, "no max_tokens means PIN's 1024 default").toBeGreaterThanOrEqual(4096);
+    // Ollama-family backends read num_predict; send both so the ceiling holds
+    // whichever one is honoured.
+    expect(body.num_predict).toBe(body.max_tokens);
+  });
+
+  it("is configurable, with a floor under it", () => {
+    expect(blogConfigFromEnv({ GWW_BLOG_MAX_TOKENS: "9000" } as NodeJS.ProcessEnv).maxTokens).toBe(9000);
+    // A ceiling too small to hold a post is the bug, so it cannot be set.
+    expect(blogConfigFromEnv({ GWW_BLOG_MAX_TOKENS: "512" } as NodeJS.ProcessEnv).maxTokens).toBeGreaterThanOrEqual(2048);
+    expect(blogConfigFromEnv({} as NodeJS.ProcessEnv).maxTokens).toBeGreaterThanOrEqual(4096);
+  });
+
+  it("reads a STREAMED post all the way to the last block", async () => {
+    // The regression, end to end: the same five-block reply delivered as SSE.
+    // Before the fix this produced a draft missing four blocks.
+    const text = completion();
+    const frames = text.match(/[\s\S]{1,40}/g) ?? [];
+    const encoder = new TextEncoder();
+    let i = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (i >= frames.length) { c.enqueue(encoder.encode("data: [DONE]\n\n")); c.close(); return; }
+        c.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: frames[i]! } }] })}\n\n`));
+        i += 1;
+      },
+    });
+    const { service } = svc({}, () => new Response(stream, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    }));
+
+    await service.tick();
+    // The proof is a post on disk. Before the fix this tick produced nothing
+    // and logged "missing SLUG, DESCRIPTION, KEYWORDS, BODY".
+    expect(service.store.count("published")).toBe(1);
+    const post = service.store.list()[0]!;
+    expect(post.title).toBe("How to Host a Game Night That Works");
+    // BODY is the block furthest past the first <<<END>>>, so its presence is
+    // what actually proves the reader stopped hanging up early.
+    expect(post.body.length).toBeGreaterThan(400);
+  });
+});

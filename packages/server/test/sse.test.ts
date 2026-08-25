@@ -122,3 +122,85 @@ describe("readSseCompletion", () => {
     expect(out.content).toBe("");
   });
 });
+
+/**
+ * THE BLOG BUG. Found live, 2026-08-25.
+ *
+ * Every blog tick reported "missing SLUG, DESCRIPTION, KEYWORDS, BODY" with
+ * about 67 characters of content — and TITLE was conspicuously NOT missing,
+ * because 67 characters is the length of a title block. The reader saw the
+ * `<<<END>>>` that closes TITLE, concluded the model was done, and hung up on
+ * a post that had four blocks still to write.
+ *
+ * The blog even carried a comment saying "no early hang-up here". The hang-up
+ * was believed to live in the voice caller; it lived in the shared reader that
+ * both of them import. A default that is correct for a one-block payload is
+ * silently destructive for any other, so the stop condition now belongs to the
+ * caller that knows the shape.
+ */
+describe("multi-block payloads", () => {
+  const blocks = (...tags: string[]): string[] =>
+    tags.map((t) => delta({ content: `<<<${t}>>>\n${t.toLowerCase()} value\n<<<END>>>\n` }));
+
+  const allFive = (c: string): boolean =>
+    ["TITLE", "SLUG", "DESCRIPTION", "KEYWORDS", "BODY"].every((t) => {
+      const open = c.indexOf(`<<<${t}>>>`);
+      return open !== -1 && c.indexOf("<<<END>>>", open) !== -1;
+    });
+
+  it("REPRODUCES the bug: the default stops after the first block", async () => {
+    const { stream } = sse([...blocks("TITLE", "SLUG", "DESCRIPTION", "KEYWORDS", "BODY"), "data: [DONE]\n\n"]);
+    const out = await readSseCompletion(stream);
+    expect(out.stoppedEarly).toBe(true);
+    expect(out.content).toContain("<<<TITLE>>>");
+    // Exactly the live symptom: four blocks never arrive.
+    expect(out.content).not.toContain("<<<BODY>>>");
+    expect(allFive(out.content)).toBe(false);
+  });
+
+  it("reads all five when the CALLER says what done means", async () => {
+    const { stream } = sse([...blocks("TITLE", "SLUG", "DESCRIPTION", "KEYWORDS", "BODY"), "data: [DONE]\n\n"]);
+    const out = await readSseCompletion(stream, { isDone: (c) => allFive(c) });
+    for (const t of ["TITLE", "SLUG", "DESCRIPTION", "KEYWORDS", "BODY"]) {
+      expect(out.content, `missing ${t}`).toContain(`<<<${t}>>>`);
+    }
+    expect(allFive(out.content)).toBe(true);
+  });
+
+  it("still hangs up once the LAST block closes — the saving is kept", async () => {
+    // The reason streaming exists here: muse keeps deliberating after she is
+    // done, and we should not pay to read it.
+    const { stream, pulled } = sse([
+      ...blocks("TITLE", "SLUG", "DESCRIPTION", "KEYWORDS", "BODY"),
+      delta({ content: "...and now several thousand characters of scratchpad." }),
+      delta({ content: "still going." }),
+      "data: [DONE]\n\n",
+    ]);
+    const onEnd = vi.fn();
+    const out = await readSseCompletion(stream, { isDone: (c) => allFive(c), onEnd });
+    expect(out.stoppedEarly).toBe(true);
+    expect(onEnd).toHaveBeenCalledOnce();
+    expect(out.content).not.toContain("scratchpad");
+    expect(pulled()).toBe(5);
+  });
+
+  it("keeps the one-block default intact for the voice line", async () => {
+    // Voice wants exactly this behaviour, and it must not regress.
+    const { stream, pulled } = sse([
+      delta({ content: "<<<LINE>>>\nPhones up.\n<<<END>>>" }),
+      delta({ content: " deliberation nobody reads" }),
+      "data: [DONE]\n\n",
+    ]);
+    const out = await readSseCompletion(stream);
+    expect(out.stoppedEarly).toBe(true);
+    expect(out.content).not.toContain("deliberation");
+    expect(pulled()).toBe(1);
+  });
+
+  it("accepts a bare callback, the way voice.ts already calls it", async () => {
+    const onEnd = vi.fn();
+    const { stream } = sse([delta({ content: "<<<LINE>>>\nx\n<<<END>>>" }), "data: [DONE]\n\n"]);
+    await readSseCompletion(stream, onEnd);
+    expect(onEnd).toHaveBeenCalledOnce();
+  });
+});
