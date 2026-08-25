@@ -409,8 +409,73 @@ body.tension #app { filter: saturate(1.15); }
 .cine-credit.meta { color: var(--dim); font-size: clamp(0.9rem, 2vw, 1.3rem); }
 .cine-credit-gap { height: 8vh; }
 
+/* ---- The crowns: what the ROOM voted for -------------------------------
+   The headline is the guess, not the award name — a person in this room wrote
+   that sentence and everyone just voted for it.
+
+   They enter from OPPOSITE EDGES on purpose. Same-direction entrances read as
+   a list; opposite vectors drag the room's eyes across the screen, and people
+   turn their heads to follow. Wipes, not fades: a clip-path reveal reads as a
+   broadcast graphic where an opacity ramp reads as a screensaver. */
+.cine-crown {
+  width: min(1100px, 92vw); margin-top: 2.2vh; padding: 1.6vh 4vw;
+  text-align: left;
+  clip-path: inset(0 100% 0 0);
+  animation: wipe-in 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.cine-crown.funny { animation-delay: 1.7s; background: var(--pop); color: #14040a; }
+.cine-crown.close {
+  animation-delay: 2.5s; background: var(--go); color: #05231b;
+  text-align: right; clip-path: inset(0 0 0 100%);
+  animation-name: wipe-in-right;
+}
+@keyframes wipe-in { to { clip-path: inset(0); } }
+@keyframes wipe-in-right { to { clip-path: inset(0); } }
+
+.cine-crown-label {
+  font-family: var(--mono); font-size: clamp(0.7rem, 1.5vw, 0.95rem);
+  letter-spacing: 0.34em; opacity: 0.72;
+}
+.cine-crown-text {
+  font-family: var(--display); font-weight: 900; font-stretch: 118%;
+  font-size: clamp(1.6rem, 6vw, 4rem); line-height: 1.04;
+  overflow-wrap: anywhere; text-wrap: balance;
+}
+.cine-crown-who {
+  font-family: var(--mono); font-weight: 700;
+  font-size: clamp(0.85rem, 2vw, 1.3rem); margin-top: 0.4em;
+}
+
+/* Taking both awards is the loudest thing that can happen in a round, and it
+   used to render as two names in the same dim grey line. */
+.cine-double {
+  margin-top: 2.4vh; font-family: var(--display); font-weight: 900;
+  font-stretch: 125%; font-size: clamp(1.4rem, 5vw, 3.2rem);
+  letter-spacing: 0.02em; color: transparent;
+  -webkit-text-stroke: 2px var(--accent);
+  animation: stamp 160ms cubic-bezier(0.16, 1, 0.3, 1) 3.4s both;
+}
+@keyframes stamp {
+  from { opacity: 0; transform: scale(1.35) rotate(-5deg); }
+  to { opacity: 1; transform: scale(1) rotate(-3deg); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cine-title, .cine-word, .cine-roll, .attract-title, .attract-line { animation: none; }
   body.tension { animation: none; }
   body.theater #app::after { display: none; }
+
+  /* Every fact still present, for the full scene, with nothing moving. The
+     wipes are what get dropped — not the crowns themselves. */
+  .cine-crown, .cine-double {
+    animation: none; clip-path: none; opacity: 1; transform: rotate(-3deg);
+  }
+  .cine-double { transform: none; }
+
+  /* The credits were UNREADABLE here. `roll-up` is the only thing positioning
+     the roll, inside a flex-end + overflow-hidden parent, so killing the
+     animation left it clipped off the bottom of the frame. Anchor it to the
+     top and let it scroll instead. */
+  .cine-credits { justify-content: flex-start; overflow-y: auto; }
+  .cine-roll { transform: none; }
 }

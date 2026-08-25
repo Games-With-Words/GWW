@@ -8,7 +8,7 @@
  */
 
 import QRCode from "qrcode";
-import { scenes, score } from "./cinema.js";
+import { scenes, score, type Crown } from "./cinema.js";
 import { api, openSocket, type CreatedRoom, type GameTile, type Socket } from "./api.js";
 import {
   amHost,
@@ -121,6 +121,39 @@ function command(name: string, payload: Record<string, unknown> = {}): void {
 
 /* -------------------------------------------------------- board cinema */
 
+/**
+ * What the room crowned, joined up for the board.
+ *
+ * The award winners arrive as slotId + playerId + votes — deliberately, since
+ * the ballot is anonymous right up until the reveal. The guess TEXT lives in
+ * the ballot, and the name lives in the player list, so the board's version of
+ * the payoff has to be assembled here from all three. Returns [] when there
+ * was no ballot (under four players it never runs), and the reveal falls back
+ * to its old shape.
+ */
+function crownsFor(s: RoomState): Crown[] {
+  const round = s.game?.round;
+  const rev = round?.reveal;
+  if (round === undefined || rev === undefined) return [];
+  const textOf = (slotId: string): string | undefined =>
+    round.ballot?.find((b) => b.slotId === slotId)?.text;
+
+  const out: Crown[] = [];
+  for (const [category, winners] of [
+    ["FUNNIEST", rev.funniest],
+    ["CLOSEST", rev.closest],
+  ] as const) {
+    for (const w of winners) {
+      const text = textOf(w.slotId);
+      // No text means no headline, and a crown with no guess on it is just a
+      // name — not worth a beat. Skip rather than show an empty slab.
+      if (text === undefined || text.length === 0) continue;
+      out.push({ category, text, who: nameOf(s, w.playerId), votes: w.votes });
+    }
+  }
+  return out;
+}
+
 let creditsRolled = false;
 function boardCinema(before: RoomState, after: RoomState, ev: { type?: string; [k: string]: unknown }): void {
   switch (ev.type) {
@@ -141,7 +174,12 @@ function boardCinema(before: RoomState, after: RoomState, ev: { type?: string; [
       const winnerId = ev["winnerId"] !== undefined ? String(ev["winnerId"]) : undefined;
       const line = after.game?.round?.revealLine;
       if (secret.length > 0) {
-        scenes.reveal(secret, line, winnerId !== undefined ? nameOf(after, winnerId) : undefined);
+        scenes.reveal(
+          secret,
+          line,
+          winnerId !== undefined ? nameOf(after, winnerId) : undefined,
+          crownsFor(after),
+        );
       }
       return;
     }
