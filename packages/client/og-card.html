@@ -1,0 +1,106 @@
+<!--
+  THE SHARE CARD — source of public/og.jpg.
+
+  Rendered, not painted: the whole point of this card is the games' own type, so
+  it is laid out in the real vendored faces (Archivo 900 stretched for the
+  wordmark, Martian Mono for anything a player would have typed) rather than
+  approximated by an image model.
+
+  To re-render after an edit: serve the client (the /fonts paths resolve from
+  packages/client/public), open this file at a viewport of exactly 1200x630, and
+  screenshot the viewport to public/og.jpg.
+
+  Two things learned making it:
+  - The card asked "which one was written blind?" and then marked the answer with
+    a red dot. Never answer your own hook.
+  - The `.row.blind` class is kept in the stylesheet but unused for that reason.
+-->
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+@font-face { font-family:"Archivo"; src:url("/fonts/archivo-var.woff2") format("woff2-variations"); font-weight:100 900; font-stretch:62% 125%; }
+@font-face { font-family:"Martian Mono"; src:url("/fonts/martianmono-var.woff2") format("woff2-variations"); font-weight:100 800; font-stretch:75% 112.5%; }
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:1200px; height:630px; overflow:hidden; }
+body {
+  background:
+    radial-gradient(1100px 520px at 50% -8%, #16202e 0%, transparent 62%),
+    linear-gradient(180deg, #0d1420 0%, #0b0b0b 46%);
+  color:#f2f2f2; font-family:"Archivo",system-ui,sans-serif;
+  display:flex; flex-direction:column; position:relative;
+}
+/* the theater letterbox, same as the board */
+.bar { position:absolute; left:0; right:0; height:26px; background:#000; }
+.bar.t { top:0 } .bar.b { bottom:0 }
+/* the horizon — behind everything, where the stage meets the riser */
+.horizon { position:absolute; left:0; right:0; top:68%; height:1px; z-index:0;
+  background:linear-gradient(90deg, transparent, #2a2a2a 18%, #2a2a2a 82%, transparent); }
+
+.wrap { position:relative; z-index:1; flex:1; display:flex; flex-direction:column;
+  padding:54px 64px 40px; }
+
+.studio { font-size:15px; letter-spacing:.42em; color:#8b8b8b; text-transform:uppercase; }
+.studio b { color:#ff4b55; font-weight:700; letter-spacing:.3em; }
+
+.title {
+  font-weight:900; font-stretch:125%; letter-spacing:.02em; line-height:.92;
+  font-size:104px; margin:14px 0 0;
+  background:linear-gradient(180deg,#ffffff 0%,#ffd166 62%,#a8644a 100%);
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+.tag { font-size:22px; color:#b3b3b3; font-style:italic; margin-top:10px; letter-spacing:.01em; }
+
+/* the fun about to happen, in words */
+.round { margin-top:26px; display:flex; gap:18px; align-items:stretch; }
+.panel { flex:1; background:#141414; border:1px solid #2a2a2a; border-radius:16px; padding:18px 20px; }
+.plabel { font-family:"Martian Mono",monospace; font-size:11px; letter-spacing:.24em;
+  color:#8b8b8b; text-transform:uppercase; }
+.q { font-family:"Martian Mono",monospace; font-size:15px; color:#f2f2f2; margin-top:10px; line-height:1.45; }
+.rows { margin-top:12px; display:flex; flex-direction:column; gap:7px; }
+.row { font-family:"Martian Mono",monospace; font-size:14px; color:#e6e6e6;
+  display:flex; align-items:center; gap:10px; }
+.row i { width:7px; height:7px; border-radius:50%; background:#3a3a3a; flex:0 0 auto; }
+.row.blind i { background:#ff4b55; box-shadow:0 0 12px #ff4b55aa; }
+.row.blind { color:#fff; }
+.hint { font-family:"Martian Mono",monospace; font-size:11px; color:#ff4b55;
+  letter-spacing:.16em; margin-top:12px; text-transform:uppercase; }
+.clue { font-family:"Archivo"; font-weight:800; font-stretch:112%; font-size:26px;
+  line-height:1.2; color:#ffd166; margin-top:12px; }
+.budget { font-family:"Martian Mono",monospace; font-size:11px; color:#8b8b8b;
+  letter-spacing:.16em; margin-top:12px; text-transform:uppercase; }
+
+.foot { margin-top:auto; display:flex; align-items:baseline; gap:16px; }
+.games { font-size:17px; letter-spacing:.06em; color:#e6e6e6; font-weight:700; }
+.games span { color:#8b8b8b; font-weight:400; }
+.url { margin-left:auto; font-family:"Martian Mono",monospace; font-size:15px;
+  color:#ffd166; letter-spacing:.06em; }
+</style></head><body>
+<div class="bar t"></div><div class="horizon"></div>
+<div class="wrap">
+  <div class="studio">Interchained LLC Labs <b>presents</b></div>
+  <h1 class="title">GAMES<br/>WITH WORDS</h1>
+  <div class="tag">The room is the game.</div>
+
+  <div class="round">
+    <div class="panel">
+      <div class="plabel">Ghost Writer · everyone answered</div>
+      <div class="q">One of you never saw the question.</div>
+      <div class="rows">
+        <div class="row"><i></i>my uncle Gary</div>
+        <div class="row"><i></i>a haunted Toyota</div>
+        <div class="row"><i></i>wet socks</div>
+      </div>
+      <div class="hint">Which one was written blind?</div>
+    </div>
+    <div class="panel">
+      <div class="plabel">Say Less · the clue is in</div>
+      <div class="clue">“Scientists regret opening prehistoric zoo”</div>
+      <div class="budget">Six words. Now guess it.</div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div class="games">Say Less <span>by The Oracle</span> &nbsp;·&nbsp; Ghost Writer <span>by Vex</span></div>
+    <div class="url">games-with-words.com</div>
+  </div>
+</div>
+<div class="bar b"></div>
+</body></html>
