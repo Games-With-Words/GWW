@@ -196,6 +196,22 @@ describe("display type fits the box, whatever a game is called", () => {
     expect(code(main)).toMatch(/fitBigType\(head\)/);
   });
 
+  it("keeps the theater horizon BEHIND the furniture", () => {
+    /**
+     * REGRESSION (live playtest, 2026-08-25): "theres a weird line horizontal
+     * accross". The horizon is a deliberate 1px floor line at 68% of the
+     * viewport, but at z-index 1 a fixed pseudo-element paints above every
+     * static card — so on a board-shaped screen it ran through the join-code
+     * card and read as a rendering artifact. Cards are fully opaque; paint order
+     * was the entire bug.
+     */
+    const rule = /body\.theater #app::before \{[\s\S]*?\}/.exec(css)?.[0] ?? "";
+    expect(rule).not.toBe("");
+    expect(rule).toMatch(/z-index:\s*-1/);
+    // And it must never intercept a tap on the board.
+    expect(rule).toContain("pointer-events: none");
+  });
+
   it("never hardcodes a game name in the title card", () => {
     const call = /scenes\.title\([^)]*\)/.exec(code(main))?.[0] ?? "";
     expect(call).toContain("currentView()");

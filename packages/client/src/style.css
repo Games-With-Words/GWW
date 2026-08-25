@@ -371,11 +371,20 @@ body.theater {
   background: linear-gradient(180deg, #101722 0%, var(--bg) 44%);
 }
 /* The horizon: where the stage meets the riser. One line, and it is the whole
-   difference between "dark background" and "a room with a floor". */
+   difference between "dark background" and "a room with a floor".
+   
+   BEHIND the content, not over it (z-index was 1; Mark, live: "theres a weird
+   line horizontal accross"). A fixed pseudo-element at z-index 1 paints above
+   every static card on the page, so at 68% of a board-shaped viewport the floor
+   line ran straight through the join-code card — reading as a rendering artifact
+   instead of a floor. Measured in a browser: the line's y sat inside the card's
+   box, and the card is fully opaque (#181818), so the only reason it showed was
+   paint order. At -1 the line stops where the furniture starts, which is what a
+   floor does. #app has no background of its own, so nothing occludes it. */
 body.theater #app::before {
   content: ""; position: fixed; left: 0; right: 0; top: 68%; height: 1px;
   background: linear-gradient(90deg, transparent, var(--line) 18%, var(--line) 82%, transparent);
-  pointer-events: none; z-index: 1;
+  pointer-events: none; z-index: -1;
 }
 /* The film grain is gone. It was a fixed full-viewport layer with
    mix-blend-mode: overlay repainting 2.5x a second at 5% opacity — invisible
