@@ -54,6 +54,15 @@ for (const name of ["Mark", "Ris", "Sonia", "Sam"]) {
 }
 ok(`4 phones + 1 board connected`);
 
+// The board's title card reads the game id from this hello. It said SAY LESS on a
+// Ghostwriter room in live play, so the input the fix depends on gets asserted.
+const boardHello = board.msgs.find((m) => m.type === "hello");
+if (boardHello?.data?.gameId !== "ghostwriter") {
+  fail(`board hello carries gameId=${JSON.stringify(boardHello?.data?.gameId)} — the marquee would be wrong`);
+} else {
+  ok(`board hello names the game (${boardHello.data.gameId}) — marquee reads the room, not a literal`);
+}
+
 // ---- start from the board (the one gesture it is allowed) -----------------
 board.ws.send(JSON.stringify({ type: "game.start", seed: 4242 }));
 await new Promise((r) => setTimeout(r, 400));

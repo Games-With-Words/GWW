@@ -60,8 +60,44 @@ describe("validateLine — the deterministic gate before a render is spent", () 
     );
   });
 
-  it("rejects a thought that trails off on a function word", () => {
-    expect(validateLine("Okay the speaker just got their secret word so everyone else")).toBeUndefined();
+  it("no longer second-guesses a finished thought by its last word", () => {
+    /**
+     * DELIBERATE REVERSAL (Mark, 2026-08-25: "<<<END>>> is the contract").
+     *
+     * This test used to assert the opposite — that a line ending on a function
+     * word was rejected as a cut-off fragment. That heuristic killed a real line
+     * in live play: "...at a prompt you never saw bring it on" is a complete
+     * sentence, and "on" was in the banned list.
+     *
+     * Only text from a CLOSED sentinel block reaches this gate, and a truncated
+     * completion is refused earlier by the finish_reason check — so completion is
+     * proven structurally and guessing at it from grammar can only be wrong.
+     * The cost of the reversal, stated honestly: a genuinely trailing line inside
+     * a properly closed block now gets voiced. The model declared it done.
+     */
+    expect(validateLine("...at a prompt you never saw bring it on")).toBe(
+      "...at a prompt you never saw bring it on.",
+    );
+    expect(validateLine("Okay the speaker just got their secret word so everyone else")).toBe(
+      "Okay the speaker just got their secret word so everyone else.",
+    );
+  });
+
+  it("still refuses lines that are unspeakable rather than unfinished", () => {
+    // What the gate is actually for, now that it stopped judging grammar.
+    expect(validateLine("too short")).toBeUndefined();
+    expect(validateLine("word ".repeat(40))).toBeUndefined();
+    expect(validateLine("go to https://example.com now everyone")).toBeUndefined();
+    expect(validateLine("1 2 3 4 5")).toBeUndefined();
+  });
+
+  it("names the rule that refused a line", async () => {
+    const { checkLine } = await import("../src/voice.js");
+    expect(checkLine("too short")).toMatchObject({ ok: false, reason: "TOO_SHORT" });
+    expect(checkLine("word ".repeat(40))).toMatchObject({ ok: false, reason: "TOO_LONG" });
+    expect(checkLine("{json: true} came back again ok")).toMatchObject({ ok: false, reason: "MARKUP" });
+    expect(checkLine("1 2 3 4 5")).toMatchObject({ ok: false, reason: "NO_LETTERS" });
+    expect(checkLine("A perfectly good hosting line for tonight")).toMatchObject({ ok: true });
   });
 
   it("strips think-blocks before judging the line", () => {
@@ -93,6 +129,49 @@ describe("VoiceService", () => {
     expect(intro.text).toBe("Welcome to the room, let the chaos commence tonight!");
     expect(intro.audioFile).toMatch(/^[a-f0-9]{16}\.wav$/);
     expect(v.audioPath(intro.audioFile!)).toBeDefined();
+  });
+
+  it("reads a STREAMING muse and hangs up on the closing sentinel", async () => {
+    /**
+     * The streaming path end to end: muse deliberates, closes the block, then
+     * keeps talking. We must take the line and stop reading — and crucially the
+     * scratchpad tail must never reach the TTS call.
+     */
+    const encoder = new TextEncoder();
+    const frame = (o: Record<string, unknown>): string =>
+      `data: ${JSON.stringify({ choices: [{ delta: o }] })}\n\n`;
+    const frames = [
+      frame({ thinking: "weighing a couple of angles here" }),
+      frame({ content: "<<<LINE>>>\nRoom wins the moment now name that invisible prompt\n<<<END>>>" }),
+      frame({ content: "\nHmm actually let me reconsider everything I just said" }),
+    ];
+    let ttsInput: string | undefined;
+    const fetcher = async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url.includes("chat/completions")) {
+        let i = 0;
+        const body = new ReadableStream<Uint8Array>({
+          pull(c) {
+            if (i >= frames.length) { c.close(); return; }
+            c.enqueue(encoder.encode(frames[i]!));
+            i += 1;
+          },
+        });
+        return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+      }
+      ttsInput = JSON.parse(String(init?.body)).input;
+      return new Response(new Uint8Array(400), { status: 200 });
+    };
+    const v = new VoiceService(cfg(), fetcher as unknown as typeof fetch);
+    const r = await v.replenishOnce();
+    expect(r.status).toBe("ok");
+    expect(ttsInput).toBe("Room wins the moment now name that invisible prompt.");
+    expect(ttsInput).not.toContain("reconsider");
+  });
+
+  it("still handles a server that ignores stream:true and sends one JSON body", async () => {
+    // The fallback every other test in this file exercises implicitly.
+    const v = new VoiceService(cfg(), fakeFetch("A perfectly ordinary non streamed hosting line."));
+    expect((await v.replenishOnce()).status).toBe("ok");
   });
 
   it("dedupes identical lines instead of re-rendering them", async () => {
@@ -128,7 +207,9 @@ describe("VoiceService", () => {
 
   it("a rejected line costs no render; a failed TTS caches nothing", async () => {
     const v1 = new VoiceService(cfg(), fakeFetch("hm"));
-    expect((await v1.replenishOnce()).status).toBe("line_rejected");
+    // Was "line_rejected" for every failure; the status now names the rule so a
+    // log line distinguishes "muse misbehaved" from "our gate did".
+    expect((await v1.replenishOnce()).status).toBe("line_rejected_too_short");
     expect(v1.generatedToday()).toBe(0);
 
     const f = (async (url: RequestInfo | URL) => {
@@ -152,7 +233,8 @@ describe("VoiceService", () => {
       return new Response(new Uint8Array(4096).fill(1), { status: 200 });
     }) as typeof fetch;
     const v = new VoiceService(cfg(), f);
-    expect((await v.replenishOnce()).status).toBe("line_rejected");
+    // No block at all is a DIFFERENT failure from a block we refused.
+    expect((await v.replenishOnce()).status).toBe("line_no_block");
     expect(v.generatedToday()).toBe(0);
   });
 

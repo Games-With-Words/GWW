@@ -208,36 +208,199 @@ const lineSystemPrompt = (cue: Cue): string =>
  * models routinely close the block inside their reasoning stream).
  */
 export function lineFromCompletion(content: string, thinking = ""): string | undefined {
-  for (const channel of [content, thinking]) {
-    if (channel.length === 0) continue;
-    const block = extractBlock(channel, LINE_TAG);
-    if (block === null) continue;
-    const line = validateLine(block);
-    if (line !== undefined) return line;
-  }
-  return undefined;
+  const found = findLine(content, thinking);
+  return found.ok ? found.line : undefined;
 }
 
-/** Deterministic sanity gate for generated lines — reject junk before it costs a render. */
-export function validateLine(raw: string): string | undefined {
+/**
+ * Same search, but it reports WHY it came back empty.
+ *
+ * The old code returned a bare undefined and the caller logged "no usable
+ * <<<LINE>>> block" for every failure — including the case where the block was
+ * found and PERFECTLY well-formed and a validator rule refused its contents.
+ * Those are opposite problems (the model misbehaved vs. our gate misbehaved) and
+ * one message for both sent Mark hunting token budgets for a line that had
+ * arrived whole. A diagnosis our own logging pre-writes is the worst kind.
+ */
+export function findLine(
+  content: string,
+  thinking = "",
+): { ok: true; line: string; channel: "content" | "thinking" } | { ok: false; reason: "NO_BLOCK" | LineRejection; extracted?: string } {
+  let lastReject: { reason: LineRejection; extracted: string } | undefined;
+  for (const [channel, text] of [["content", content], ["thinking", thinking]] as const) {
+    if (text.length === 0) continue;
+    const block = extractBlock(text, LINE_TAG);
+    if (block === null) continue;
+    const check = checkLine(block);
+    if (check.ok) return { ok: true, line: check.line, channel };
+    lastReject = { reason: check.reason, extracted: check.line };
+  }
+  if (lastReject !== undefined) return { ok: false, reason: lastReject.reason, extracted: lastReject.extracted };
+  return { ok: false, reason: "NO_BLOCK" };
+}
+
+/** Why a line was refused. Named so the log can say which rule fired. */
+export type LineRejection = "EMPTY" | "TOO_SHORT" | "TOO_LONG" | "MARKUP" | "NO_LETTERS";
+
+export type LineCheck =
+  | { ok: true; line: string }
+  | { ok: false; reason: LineRejection; line: string };
+
+/**
+ * Deterministic sanity gate — reject junk before it costs a render.
+ *
+ * THE DANGLING-WORD RULE IS GONE (Mark's call, 2026-08-25: "<<<END>>> is the
+ * contract"). It used to reject any line ending on a function word, on the
+ * theory that such a line was a cut-off thought. It cost us a real line in live
+ * play: muse wrote
+ *
+ *   "...you get one charming guess at a prompt you never saw bring it on"
+ *
+ * which is a complete sentence, and the gate threw it away because "on" was in
+ * the list. The same trap was waiting for "what are you waiting for", "that's
+ * what it's for", and anything ending in is / are / to / by / at / in.
+ *
+ * The rule was a leftover from when we MINED the reasoning stream for an answer
+ * and had to guess whether a fragment was finished. That era is over: the model
+ * now declares completion by closing a sentinel block, extractBlock only returns
+ * CLOSED blocks, and a truncated completion is refused earlier by the
+ * finish_reason check. Completion is structural now, so guessing at it from
+ * grammar is both unnecessary and — as the live failure proved — wrong.
+ *
+ * What remains are checks about the line being SPEAKABLE, not finished: it has
+ * words, not too many, no markup, and at least one letter.
+ */
+export function checkLine(raw: string): LineCheck {
   // Local models often narrate before they answer — strip reasoning blocks
   // and take the LAST non-empty line, which is where the actual answer lives.
   let line = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
   const parts = line.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
   if (parts.length > 0) line = parts[parts.length - 1]!;
   line = line.replace(/^["'“‘]+|["'”’]+$/g, "").trim();
+
+  if (line.length === 0) return { ok: false, reason: "EMPTY", line };
   const words = line.split(/\s+/).filter(Boolean);
-  if (words.length < 4 || words.length > 30) return undefined;
-  if (/https?:|<|>|\{|\}/.test(line)) return undefined;
-  if (!/[a-zA-Z]/.test(line)) return undefined;
-  // Unfinished thoughts end on function words ("...so everyone else").
-  // Complete thoughts missing a period get one — muse often skips it, and
-  // rejecting her real answer sent the miner into her scratchpad (seen live).
-  const lastWord = words[words.length - 1]!.toLowerCase().replace(/[^a-z']/g, "");
-  const DANGLING = new Set(["so", "and", "but", "or", "the", "a", "an", "to", "of", "with", "for", "else", "that", "which", "their", "your", "my", "his", "her", "its", "as", "at", "in", "on", "by", "is", "are", "was", "be"]);
-  if (DANGLING.has(lastWord)) return undefined;
+  if (words.length < 4) return { ok: false, reason: "TOO_SHORT", line };
+  if (words.length > 30) return { ok: false, reason: "TOO_LONG", line };
+  if (/https?:|<|>|\{|\}/.test(line)) return { ok: false, reason: "MARKUP", line };
+  if (!/[a-zA-Z]/.test(line)) return { ok: false, reason: "NO_LETTERS", line };
+
+  // A complete thought missing its period gets one — muse often skips it.
   if (!/[.!?…]$/.test(line)) line = `${line}.`;
-  return line;
+  return { ok: true, line };
+}
+
+/** Back-compat wrapper: the line, or undefined. */
+export function validateLine(raw: string): string | undefined {
+  const check = checkLine(raw);
+  return check.ok ? check.line : undefined;
+}
+
+/**
+ * What a streamed completion produced.
+ *
+ * `stoppedEarly` means we saw the closing marker and hung up rather than waiting
+ * for the model to finish talking to itself.
+ */
+export interface StreamedCompletion {
+  content: string;
+  thinking: string;
+  finishReason: string | undefined;
+  stoppedEarly: boolean;
+  /** Server-sent events seen. Zero means the endpoint did not actually stream. */
+  events: number;
+}
+
+const SSE_DONE = "[DONE]";
+
+/**
+ * Read an OpenAI-style SSE stream and stop at the closing sentinel.
+ *
+ * WHY STREAM AT ALL (Mark's call, 2026-08-25): muse is a reasoning model, and the
+ * live logs show her spending 3,400 characters of scratchpad to produce a 23-word
+ * line. With a single JSON response we pay for all of that before we see a
+ * character. Streaming lets us hang up the moment `<<<END>>>` lands, which is the
+ * model's own DONE signal — the same contract the parser already relies on.
+ *
+ * This did NOT cause the bug it was proposed for: that line arrived complete with
+ * finish_reason "stop" and was killed by our own validator. Streaming is a
+ * latency and cost win, and real protection for the day an upstream cap DOES
+ * truncate her — not a fix for that failure. Worth being clear about, because a
+ * change that lands next to a bug tends to get credit for solving it.
+ *
+ * Written as a function over a stream rather than inside the fetch call so it can
+ * be unit-tested against a fabricated stream, with no network and no model.
+ */
+export async function readSseCompletion(
+  stream: ReadableStream<Uint8Array>,
+  onEnd?: () => void,
+): Promise<StreamedCompletion> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  let thinking = "";
+  let finishReason: string | undefined;
+  let events = 0;
+  let stoppedEarly = false;
+
+  const closed = (): boolean => content.includes("<<<END>>>") || thinking.includes("<<<END>>>");
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE frames are separated by a blank line; a frame may hold several
+      // `data:` lines. Keep the trailing partial frame in the buffer.
+      const frames = buffer.split(/\r?\n\r?\n/);
+      buffer = frames.pop() ?? "";
+
+      for (const frame of frames) {
+        for (const rawLine of frame.split(/\r?\n/)) {
+          const line = rawLine.trim();
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
+          if (data === SSE_DONE) { events += 1; continue; }
+          events += 1;
+          let parsed: {
+            choices?: {
+              finish_reason?: string | null;
+              delta?: { content?: string; thinking?: string; reasoning_content?: string };
+              message?: { content?: string; thinking?: string; reasoning_content?: string };
+              text?: string;
+            }[];
+          };
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            continue; // a keep-alive or a partial frame we cannot use
+          }
+          const choice = parsed.choices?.[0];
+          const delta = choice?.delta ?? choice?.message;
+          content += delta?.content ?? choice?.text ?? "";
+          thinking += delta?.thinking ?? delta?.reasoning_content ?? "";
+          if (choice?.finish_reason !== undefined && choice.finish_reason !== null) {
+            finishReason = choice.finish_reason;
+          }
+        }
+      }
+
+      if (closed()) {
+        // The model said DONE. Everything after this is deliberation we throw
+        // away anyway, so stop paying for it.
+        stoppedEarly = true;
+        onEnd?.();
+        break;
+      }
+    }
+  } finally {
+    // Releasing the lock is enough; cancel() on an aborted body can reject.
+    try { await reader.cancel(); } catch { /* already gone */ }
+  }
+
+  return { content, thinking, finishReason, stoppedEarly, events };
 }
 
 export class VoiceService {
@@ -352,6 +515,8 @@ export class VoiceService {
     const cue = cueOverride ?? this.neediestCue();
 
     // 1. muse-local writes the line (through PIN, server-to-server).
+    // Pulled when the closing sentinel lands — the point of streaming.
+    const abort = new AbortController();
     const chatRes = await this.fetcher(`${this.cfg.aiasUrl}/api/v1/pin/chat/completions`, {
       method: "POST",
       headers: {
@@ -370,46 +535,87 @@ export class VoiceService {
           },
         ],
         temperature: 1.0,
+        // Stream, so we can hang up on <<<END>>> instead of waiting out the
+        // scratchpad. Servers that ignore this just send one JSON body, which
+        // the fallback below handles.
+        stream: true,
         // NO token cap. muse thinks before she speaks — Mark's call: let her.
         // Every cap we tried (80, 500) choked the deliberation and content
         // came back empty. She's local, on our own A6000 — tokens are free.
       }),
+      signal: abort.signal,
     });
     if (!chatRes.ok) return { status: `line_failed_${chatRes.status}`, cue };
-    const chat = (await chatRes.json()) as {
-      choices?: {
-        finish_reason?: string;
-        message?: { content?: string; reasoning_content?: string; thinking?: string };
-        text?: string;
-      }[];
-    };
-    const msg = chat.choices?.[0];
-    // Every muse response hits the log while we tune the pipeline — Mark's
-    // call: the raw body is the ground truth, show it.
-    console.log(`[voice] muse response (${cue}): ${JSON.stringify(chat).slice(0, 600)}`);
+
+    /**
+     * Two shapes, one path.
+     *
+     * A streaming server sends text/event-stream and we read it until the
+     * closing sentinel. Anything else — a server that ignored `stream: true`, a
+     * test fake handing back a plain Response — is parsed as one JSON body. The
+     * fallback is not defensive padding: the entire existing voice suite fakes
+     * this endpoint with plain JSON, and those tests are the regression net for
+     * this change.
+     */
+    const ctype = chatRes.headers?.get?.("content-type") ?? "";
+    let content = "";
+    let thinking = "";
+    let finishReason: string | undefined;
+    let streamNote = "";
+
+    if (ctype.includes("text/event-stream") && chatRes.body !== null && chatRes.body !== undefined) {
+      const streamed = await readSseCompletion(chatRes.body, () => abort.abort());
+      content = streamed.content;
+      thinking = streamed.thinking;
+      finishReason = streamed.finishReason;
+      streamNote = ` [stream: ${streamed.events} event(s)${streamed.stoppedEarly ? ", hung up on <<<END>>>" : ""}]`;
+    } else {
+      const chat = (await chatRes.json()) as {
+        choices?: {
+          finish_reason?: string;
+          message?: { content?: string; reasoning_content?: string; thinking?: string };
+          text?: string;
+        }[];
+      };
+      console.log(`[voice] muse response (${cue}): ${JSON.stringify(chat).slice(0, 600)}`);
+      const msg = chat.choices?.[0];
+      content = msg?.message?.content ?? msg?.text ?? "";
+      thinking = msg?.message?.thinking ?? msg?.message?.reasoning_content ?? "";
+      finishReason = msg?.finish_reason;
+    }
 
     // The model says DONE by closing a sentinel block. A cut-off completion
     // can't have closed one — fail loudly rather than parsing a fragment.
-    if (msg?.finish_reason === "length") {
+    // (Streaming makes this rare: we stop AT the marker, so a `length` finish
+    // means the cap hit before she ever got there.)
+    if (finishReason === "length") {
       console.log(`[voice] muse was TRUNCATED (finish_reason=length) — no cap is set, check the upstream limit`);
       return { status: "line_truncated", cue };
     }
 
-    // Answer channel first, then thinking — some servers close the block
-    // inside the reasoning stream. Nonstandard `text` counts as content.
-    const content = msg?.message?.content ?? msg?.text ?? "";
-    const thinking = msg?.message?.thinking ?? msg?.message?.reasoning_content ?? "";
-    const line = lineFromCompletion(content, thinking);
-    if (line === undefined) {
-      // Show WHAT was rejected, from BOTH channels — a bare "line_rejected",
-      // or a tail of the (usually empty) content, cost us debugging loops.
+    const found = findLine(content, thinking);
+    if (!found.ok) {
+      /**
+       * Say WHICH failure this is. "No usable block" for both a missing block
+       * and a rejected-by-our-own-gate line is what cost a debugging loop in
+       * live play — the block had arrived whole and closed.
+       */
+      if (found.reason === "NO_BLOCK") {
+        console.log(
+          `[voice] no <<<${LINE_TAG}>>> block in either channel${streamNote}. ` +
+          `content(${content.length}) tail: ${JSON.stringify(content.slice(-200))} | ` +
+          `thinking(${thinking.length}) tail: ${JSON.stringify(thinking.slice(-300))}`,
+        );
+        return { status: "line_no_block", cue };
+      }
       console.log(
-        `[voice] no usable <<<${LINE_TAG}>>> block. content(${content.length}) tail: ` +
-        `${JSON.stringify(content.slice(-200))} | thinking(${thinking.length}) tail: ` +
-        `${JSON.stringify(thinking.slice(-300))}`,
+        `[voice] block found but REJECTED by our gate (${found.reason})${streamNote}: ` +
+        `${JSON.stringify(found.extracted ?? "")}`,
       );
-      return { status: "line_rejected", cue };
+      return { status: `line_rejected_${found.reason.toLowerCase()}`, cue };
     }
+    const line = found.line;
+    console.log(`[voice] line accepted from ${found.channel}${streamNote}: ${JSON.stringify(line)}`);
 
     const hash = createHash("sha256").update(line).digest("hex").slice(0, 16);
     if (this.manifest.entries.some((e) => e.hash === hash)) return { status: "duplicate", cue };

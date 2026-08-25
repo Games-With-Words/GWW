@@ -182,6 +182,32 @@ describe("the board's strips do real work", () => {
     expect(ts).toMatch(/STANDINGS/);
   });
 
+  it("never hardcodes a game name in the cinema — the board announces the room's game", () => {
+    /**
+     * REGRESSION (live playtest, 2026-08-25): a Ghostwriter room opened with the
+     * title card "INTERCHAINED LLC LABS presents SAY LESS", and the end-of-game
+     * credits would have credited The Oracle for someone else's game.
+     *
+     * Asserted at the source because the cinema takes strings as arguments — no
+     * runtime state distinguishes a right title from a wrong one, so the only
+     * place to catch a literal is where it is written.
+     */
+    const cinemaCalls = ts.match(/scenes\.(title|credits)\([^)]*\)/g) ?? [];
+    expect(cinemaCalls.length).toBeGreaterThan(0);
+    for (const call of cinemaCalls) {
+      expect(call).not.toMatch(/say\s*less/i);
+      expect(call).not.toMatch(/The Oracle/);
+      // Whatever it passes must come from the registered view or the manifest.
+      expect(call).toMatch(/currentView\(\)|tile\?|\bcredit\b/);
+    }
+  });
+
+  it("puts the arcade on the attract screen, not one game's name", () => {
+    const attract = /const marquee[\s\S]{0,200}/.exec(ts)?.[0] ?? "";
+    expect(attract).toContain("GAMES WITH WORDS");
+    expect(attract).toContain("currentView()");
+  });
+
   it("still un-pins the composer on the board", () => {
     // Guarded separately above too — repeated here because this describe adds
     // new #app.board rules and that literal is easy to disturb.
