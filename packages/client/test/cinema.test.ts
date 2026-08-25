@@ -36,6 +36,28 @@ const main = readFileSync(join(import.meta.dirname, "../src/main.ts"), "utf8");
 const reducedMotionCss = (): string =>
   (css.match(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\n\}/g) ?? []).join("\n");
 
+/** Resolve a var() or literal against :root, then measure the pair. */
+function crownContrast(rule: string): number {
+  const root = /:root\s*\{[\s\S]*?\n\}/.exec(css)?.[0] ?? "";
+  const token = (n: string): string =>
+    new RegExp(`--${n}:\\s*(#[0-9a-fA-F]{3,8})`).exec(root)?.[1] ?? "#000000";
+  const resolve = (v: string): string =>
+    v.startsWith("var(") ? token(v.slice(6, -1)) : v;
+  const fill = resolve(/background:\s*(var\([^)]+\)|#[0-9a-fA-F]{3,6})/.exec(rule)?.[1] ?? "#000");
+  const ink = resolve(/color:\s*(var\([^)]+\)|#[0-9a-fA-F]{3,6})/.exec(rule)?.[1] ?? "#fff");
+  const lum = (hex: string): number => {
+    const h = hex.replace("#", "").slice(0, 6);
+    const ch = (c: number): number => {
+      const s = c / 255;
+      return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    };
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+    return 0.2126 * ch(r!) + 0.7152 * ch(g!) + 0.0722 * ch(b!);
+  };
+  const [a, b] = [lum(fill), lum(ink)];
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
 const crown = (over: Partial<Crown> = {}): Crown => ({
   category: "FUNNIEST",
   text: "a haunted lute",
@@ -231,12 +253,16 @@ describe("the crowns are legible on a television", () => {
     expect(rule).toMatch(/font-size: clamp\([^)]*\)/);
   });
 
-  it("puts dark type on both award fills — white on these would fail", () => {
-    const funny = /\.cine-crown\.funny \{[^}]*\}/.exec(css)?.[0] ?? "";
-    const close = /\.cine-crown\.close \{[^}]*\}/.exec(css)?.[0] ?? "";
-    expect(funny).toMatch(/color: #[0-9a-f]{6}/i);
-    expect(close).toMatch(/color: #[0-9a-f]{6}/i);
-    expect(funny).not.toMatch(/color:\s*(#fff|white)/i);
-    expect(close).not.toMatch(/color:\s*(#fff|white)/i);
+  it("gives each award fill a legible ink, whichever way round it is", () => {
+    // Both crowns are colour fills carrying type, so the pairing has to clear
+    // AA — but WHICH ink is correct depends on the fill. White is right on the
+    // red (4.79) and wrong on the green; dark is the reverse. Asserting a
+    // literal hex just encodes today's palette, so compute the ratio instead.
+    for (const sel of ["funny", "close"]) {
+      const rule = new RegExp(`\\.cine-crown\\.${sel} \\{[^}]*\\}`).exec(css)?.[0] ?? "";
+      expect(rule, `${sel} rule`).toMatch(/background:\s*var\(--\w[\w-]*\)/);
+      expect(rule, `${sel} needs an explicit ink`).toMatch(/color:\s*(var\(--[\w-]+\)|#[0-9a-f]{3,6})/i);
+      expect(crownContrast(rule), `${sel} fill/ink contrast`).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });
