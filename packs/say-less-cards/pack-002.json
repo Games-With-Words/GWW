@@ -1,10 +1,16 @@
 {
   "provenance": {
     "specId": "say-less-cards",
-    "specVersion": "1",
+    "specVersion": "2",
     "model": "muse-local:latest",
     "generatedAt": "2026-08-24T15:50:57.129Z",
-    "promptHash": "bb62f7cae333"
+    "promptHash": "bb62f7cae333",
+    "migrations": [
+      "budget-v1-to-v2"
+    ],
+    "migrationNotes": {
+      "budget-v1-to-v2": "budget rescaled from the v1 1-7 range to the v2 6-20 range as 12 + 2*difficulty; no other field altered"
+    }
   },
   "items": [
     {
@@ -20,7 +26,7 @@
         "stomach",
         "pizza"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -36,7 +42,7 @@
         "imaginary",
         "notification"
       ],
-      "budget": 4,
+      "budget": 18,
       "difficulty": 3
     },
     {
@@ -53,7 +59,7 @@
         "meme",
         "notification"
       ],
-      "budget": 4,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -67,7 +73,7 @@
         "request",
         "curtain"
       ],
-      "budget": 4,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -81,7 +87,7 @@
         "sting",
         "annoying"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -97,7 +103,7 @@
         "news",
         "late"
       ],
-      "budget": 3,
+      "budget": 18,
       "difficulty": 3
     },
     {
@@ -113,7 +119,7 @@
         "cold",
         "children"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -130,7 +136,7 @@
         "drawer",
         "mystery"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -147,7 +153,7 @@
         "art",
         "portrait"
       ],
-      "budget": 3,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -164,7 +170,7 @@
         "humming",
         "tune"
       ],
-      "budget": 4,
+      "budget": 18,
       "difficulty": 3
     },
     {
@@ -178,7 +184,7 @@
         "yellow",
         "road"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -193,7 +199,7 @@
         "leaving",
         "parents"
       ],
-      "budget": 3,
+      "budget": 18,
       "difficulty": 3
     },
     {
@@ -207,7 +213,7 @@
         "miles",
         "lonely"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -224,7 +230,7 @@
         "highway",
         "waitress"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -240,7 +246,7 @@
         "dryer",
         "coins"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -254,7 +260,7 @@
         "running",
         "underdog"
       ],
-      "budget": 4,
+      "budget": 18,
       "difficulty": 3
     },
     {
@@ -270,7 +276,7 @@
         "spoiler",
         "teaser"
       ],
-      "budget": 4,
+      "budget": 18,
       "difficulty": 3
     },
     {
@@ -286,7 +292,7 @@
         "queue",
         "deadline"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -300,7 +306,7 @@
         "storage",
         "fridge"
       ],
-      "budget": 5,
+      "budget": 18,
       "difficulty": 3
     },
     {
@@ -316,7 +322,7 @@
         "bubbly",
         "jar"
       ],
-      "budget": 4,
+      "budget": 18,
       "difficulty": 3
     },
     {
@@ -332,7 +338,7 @@
         "convenience",
         "roadtrip"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -346,7 +352,7 @@
         "soundtrack",
         "aesthetic"
       ],
-      "budget": 3,
+      "budget": 18,
       "difficulty": 3
     },
     {
@@ -362,7 +368,7 @@
         "dusty",
         "nostalgia"
       ],
-      "budget": 4,
+      "budget": 18,
       "difficulty": 3
     },
     {
@@ -378,7 +384,7 @@
         "jinx",
         "charm"
       ],
-      "budget": 4,
+      "budget": 18,
       "difficulty": 3
     },
     {
@@ -394,7 +400,7 @@
         "brew",
         "kitchen"
       ],
-      "budget": 5,
+      "budget": 14,
       "difficulty": 1
     },
     {
@@ -408,7 +414,7 @@
         "cheese",
         "midnight"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -425,7 +431,7 @@
         "hazard",
         "puddle"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -441,7 +447,7 @@
         "neighborhood",
         "neon"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -457,7 +463,7 @@
         "witness",
         "social"
       ],
-      "budget": 3,
+      "budget": 18,
       "difficulty": 3
     },
     {
@@ -474,7 +480,7 @@
         "estranged",
         "passive"
       ],
-      "budget": 4,
+      "budget": 18,
       "difficulty": 3
     },
     {
@@ -491,7 +497,7 @@
         "cleaning",
         "fuzzy"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -506,7 +512,7 @@
         "gathering",
         "church"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -520,7 +526,7 @@
         "coin",
         "ticket"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -534,7 +540,7 @@
         "cold",
         "jacket"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -549,7 +555,7 @@
         "window",
         "landing"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -566,7 +572,7 @@
         "bridge",
         "solo"
       ],
-      "budget": 3,
+      "budget": 18,
       "difficulty": 3
     },
     {
@@ -580,7 +586,7 @@
         "handshake",
         "interview"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -594,7 +600,7 @@
         "closet",
         "squeak"
       ],
-      "budget": 6,
+      "budget": 16,
       "difficulty": 2
     },
     {
@@ -610,7 +616,7 @@
         "episode",
         "finale"
       ],
-      "budget": 4,
+      "budget": 18,
       "difficulty": 3
     },
     {
@@ -627,7 +633,7 @@
         "private",
         "mirror"
       ],
-      "budget": 5,
+      "budget": 16,
       "difficulty": 2
     }
   ]
