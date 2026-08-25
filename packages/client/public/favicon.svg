@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Games With Words">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.55" stop-color="#ffd166"/>
+      <stop offset="1" stop-color="#e0913c"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="#0b0b0b"/>
+  <!-- The quotation mark, drawn as geometry rather than set as type: no font to
+       load, crisp at every size, and it is the board's own motif — every clue and
+       every reveal line on the television is wrapped in curly quotes. -->
+  <g fill="url(#g)">
+    <path d="M188 128c-46 0-84 38-84 86 0 44 33 80 76 85-6 30-28 55-58 66-11 4-16 16-11 26 4 9 15 14 25 10 66-24 108-86 108-160V214c0-47-38-86-56-86z"/>
+    <path d="M400 128c-46 0-84 38-84 86 0 44 33 80 76 85-6 30-28 55-58 66-11 4-16 16-11 26 4 9 15 14 25 10 66-24 108-86 108-160V214c0-47-38-86-56-86z"/>
+  </g>
+</svg>
