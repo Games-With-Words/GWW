@@ -11,7 +11,10 @@ import { describe, expect, it } from "vitest";
 import { initialRoom, reduce } from "../src/state.js";
 
 const css = readFileSync(join(import.meta.dirname, "../src/style.css"), "utf8");
-const ts = readFileSync(join(import.meta.dirname, "../src/main.ts"), "utf8");
+// The Say Less UI moved to src/games/say-less.ts in the multi-game split
+// (2026-08-24). Only the PATH below changed — every assertion in this file is
+// byte-for-byte what it was when the UI lived in main.ts.
+const ts = readFileSync(join(import.meta.dirname, "../src/games/say-less.ts"), "utf8");
 
 const ballotState = (over: Record<string, unknown> = {}) => ({
   type: "state",

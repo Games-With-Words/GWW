@@ -8,6 +8,10 @@ import { describe, expect, it } from "vitest";
 
 const css = readFileSync(join(import.meta.dirname, "../src/style.css"), "utf8");
 const ts = readFileSync(join(import.meta.dirname, "../src/main.ts"), "utf8");
+// Say Less's composer and inputs moved to src/games/say-less.ts in the
+// multi-game split; board furniture and Ris still live in main.ts, so the two
+// sources are read separately and each assertion points at the file it is about.
+const sl = readFileSync(join(import.meta.dirname, "../src/games/say-less.ts"), "utf8");
 
 describe("mobile invariants", () => {
   it("never lets an input fall below 16px — iOS zooms in on focus and never back out", () => {
@@ -24,12 +28,12 @@ describe("mobile invariants", () => {
   });
 
   it("applies the composer to both the clue and the guess forms", () => {
-    expect(ts.match(/class="card stack composer"/g)).toHaveLength(2);
+    expect(sl.match(/class="card stack composer"/g)).toHaveLength(2);
   });
 
   it("tells the phone keyboard what its action key does", () => {
     // Every text input the player types into should declare an intent.
-    const inputs = ts.match(/<input[^>]*type="text"[^>]*>/g) ?? [];
+    const inputs = sl.match(/<input[^>]*type="text"[^>]*>/g) ?? [];
     expect(inputs.length).toBeGreaterThan(0);
     for (const i of inputs) expect(i).toMatch(/enterkeyhint=/);
   });

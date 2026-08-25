@@ -24,9 +24,24 @@ export type Cue =
   | "clue"
   | "timeout"
   | "correct"
-  | "outro";
+  | "outro"
+  // Cues a second game needed. Ris hosts the arcade, not one game: a game names
+  // its own moments in effects().cue, and the bank either has lines for that
+  // moment or the board simply stays quiet. Adding a cue is adding L0 lines —
+  // the Record below is exhaustive, so the compiler will not let a cue ship mute.
+  | "vote"
+  | "caught"
+  | "survived";
 
-export const CUES: Cue[] = ["intro", "round", "clue", "timeout", "correct", "outro"];
+export const CUES: Cue[] = [
+  "intro", "round", "clue", "timeout", "correct", "outro",
+  "vote", "caught", "survived",
+];
+
+/** Does the voice bank host this moment? Unknown cues are ignored, never fatal. */
+export function isCue(name: string): name is Cue {
+  return (CUES as string[]).includes(name);
+}
 
 /** L0 — hand-written Ris intro lines. The floor the pipeline can never sink below. */
 export const L0_INTRO_LINES: string[] = [
@@ -72,6 +87,24 @@ export const L0_CUE_LINES: Record<Cue, string[]> = {
     "And scene! Tonight's best rounds are tomorrow's inside jokes.",
     "Game over! The scoreboard is final. The rematch demands are inevitable.",
   ],
+  vote: [
+    "Answers are in and nobody knows who wrote what. Find the one who was guessing.",
+    "Read them again. One of these people had no idea what the question was.",
+    "Vote on your phones. Trust nothing, especially the confident ones.",
+    "Somebody at this table is bluffing beautifully. Point at them.",
+  ],
+  caught: [
+    "CAUGHT! The room smelled it. One last chance — what was the question?",
+    "Busted. Now the fun part: do you even know what you were answering?",
+    "They got you. Redeem yourself — name the prompt.",
+    "The room has spoken, and it spoke your name. Last word?",
+  ],
+  survived: [
+    "The Ghost walks free. You people were RIGHT THERE.",
+    "Nobody caught it. Somebody at this table lies for a living.",
+    "Clean escape. That answer had no business fitting that well.",
+    "The room split, the Ghost strolled out. Painful.",
+  ],
 };
 
 /** What muse is asked to write, per cue. One line, speakable, under 25 words. */
@@ -82,6 +115,9 @@ const CUE_BRIEFS: Record<Cue, string> = {
   timeout: "Write EXACTLY ONE fresh line for the moment time runs out and NOBODY guessed the word — playful sting, roast the moment never a person.",
   correct: "Write EXACTLY ONE fresh celebratory line for the moment someone guesses the secret word correctly.",
   outro: "Write EXACTLY ONE fresh sign-off line for the end of the game — send the room off laughing.",
+  vote: "The anonymous answers are on the board and the room must vote on which one was written blind. Build suspicion, name nobody.",
+  caught: "The room correctly identified the Ghost, who now gets one attempt to name the prompt they never saw. Gloat, then dare them.",
+  survived: "The Ghost escaped the vote. Celebrate the bluff and needle the room for missing it.",
 };
 
 interface VoiceEntry {

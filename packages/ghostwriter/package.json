@@ -1,0 +1,21 @@
+{
+  "name": "@gww/ghostwriter",
+  "version": "0.1.0",
+  "description": "Ghostwriter — everyone answers the prompt except one of you, who never saw it. Arcade game #2, by Vex. Deterministic, server-authoritative, event-sourced engine. Pure functions, zero I/O.",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "dependencies": {
+    "@gww/kit": "workspace:*"
+  }
+}

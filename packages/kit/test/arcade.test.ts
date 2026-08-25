@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createArcade, type GameModule } from "../src/index.js";
+import { createArcade, projectAll, type GameModule } from "../src/index.js";
 
 function fakeGame(gameId: string, maker = "Vex"): GameModule {
   return {
@@ -16,6 +16,9 @@ function fakeGame(gameId: string, maker = "Vex"): GameModule {
     },
     createSession: () => ({ state: {}, events: [] }),
     command: (state) => ({ state, events: [] }),
+    // Contract v2 requires a projection. A stub game has nothing to hide, which
+    // is exactly the case projectAll exists for.
+    project: projectAll,
   };
 }
 
@@ -38,6 +41,13 @@ describe("createArcade", () => {
   it("rejects invalid ids", () => {
     const arcade = createArcade();
     expect(() => arcade.register(fakeGame("Bad_ID!"))).toThrowError(/Invalid gameId/);
+  });
+
+  it("refuses a game with no projection — a state the platform cannot redact", () => {
+    const arcade = createArcade();
+    const noProject = fakeGame("leaky") as { project?: unknown };
+    delete noProject.project;
+    expect(() => arcade.register(noProject as GameModule)).toThrowError(/has no project\(\)/);
   });
 
   it("get returns the module or undefined", () => {
