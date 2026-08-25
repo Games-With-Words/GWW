@@ -2,7 +2,7 @@
  * Mobile invariants. These are CSS rules whose absence is invisible in review
  * and painful on a phone, so they get asserted instead of remembered.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -101,5 +101,51 @@ describe("audio never fails silently", () => {
 
   it("says so on screen when the browser is still refusing", () => {
     expect(src).toContain("Ris can't speak");
+  });
+});
+
+/* ---- Fonts are ours ------------------------------------------------------
+   This stack synthesizes its own score from oscillators specifically to avoid
+   a CDN (see cinema.ts), and then rendered its own name through fonts.
+   googleapis.com. Worse, the built artifact never requested the display face
+   at all, so the live board fell back through a font nobody has to the UI
+   font — the most theatrical element in the product was a lie in production.
+
+   A remote font is not just a dependency, it is a board that renders wrong on
+   a TV with slow DNS, in the ten seconds when everyone is looking at it. */
+describe("fonts are vendored, not fetched", () => {
+  const html = readFileSync(join(import.meta.dirname, "../index.html"), "utf8");
+  const fontDir = join(import.meta.dirname, "../public/fonts");
+
+  it("never requests a font from a third party", () => {
+    expect(html).not.toMatch(/fonts\.googleapis\.com|fonts\.gstatic\.com/);
+    // Any absolute stylesheet or font URL is suspect; local paths are relative.
+    expect(html).not.toMatch(/<link[^>]+href="https?:\/\/[^"]*(font|css)/i);
+  });
+
+  it("declares both faces against local files", () => {
+    const faces = css.match(/@font-face\s*\{[\s\S]*?\}/g) ?? [];
+    expect(faces.length).toBeGreaterThanOrEqual(2);
+    for (const f of faces) expect(f).toMatch(/url\("\/fonts\/[^"]+\.woff2"\)/);
+  });
+
+  it("ships the files it declares — a rename must not silently fall back", () => {
+    const declared = [...css.matchAll(/url\("\/fonts\/([^"]+)"\)/g)].map((m) => m[1]!);
+    expect(declared.length).toBeGreaterThan(0);
+    for (const file of declared) {
+      expect(existsSync(join(fontDir, file)), `missing ${file}`).toBe(true);
+    }
+  });
+
+  it("ships the OFL license beside them, because the license requires it", () => {
+    const licenses = readdirSync(fontDir).filter((f) => /^OFL.*\.txt$/.test(f));
+    expect(licenses.length).toBeGreaterThanOrEqual(2);
+    for (const l of licenses) {
+      expect(readFileSync(join(fontDir, l), "utf8")).toContain("SIL Open Font License");
+    }
+  });
+
+  it("preloads the display face — it is the first thing anyone sees", () => {
+    expect(html).toMatch(/<link rel="preload"[^>]+\/fonts\/[^"]+\.woff2"[^>]*as="font"/);
   });
 });

@@ -5,9 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0b0b13" />
   <title>Games With Words — The room is the game.</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <!-- Fonts are VENDORED, not fetched. A stack that synthesizes its own score
+       from oscillators to avoid a CDN should not render its own name through
+       one. Two variable files, self-hosted, ~180KB total, replacing three
+       remote families — and the board works on a TV with no DNS. -->
+  <link rel="preload" href="/fonts/archivo-var.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
