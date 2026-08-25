@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  One page, honestly declared.
+
+  This is a single-surface app: the arcade IS the site. Listing invented URLs to
+  pad a sitemap is how you teach a crawler to distrust the file, and room URLs
+  are deliberately absent — they are token-bearing and expire in four hours.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://games-with-words.com/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>

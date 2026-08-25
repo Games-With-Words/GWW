@@ -1,0 +1,12 @@
+# Games With Words — games-with-words.com
+#
+# Everything public is welcome. The only paths worth keeping crawlers out of are
+# the ones that are per-room and ephemeral: a join link carries a token, a room
+# expires in four hours, and an indexed room URL is a dead link by morning.
+
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /ws
+
+Sitemap: https://games-with-words.com/sitemap.xml
