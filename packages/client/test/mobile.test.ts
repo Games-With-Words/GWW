@@ -87,6 +87,47 @@ describe("mobile invariants", () => {
     expect(data["@graph"][0]!.name).toBe("Games With Words");
   });
 
+  it("has a favicon in every shape the web asks for", () => {
+    /**
+     * There was no icon at all, so Google's mobile results showed a generic globe
+     * next to the brand and an iOS home-screen shortcut got a screenshot.
+     *
+     * The mark is a quotation mark drawn as geometry — no font dependency, crisp
+     * at every size, and it is the board's own motif. Verified at real favicon
+     * sizes in a browser before shipping: still a quote at 32px, still
+     * distinctive at 16 because of the black tile.
+     */
+    const html = readFileSync(join(import.meta.dirname, "../index.html"), "utf8");
+    expect(html).toContain('rel="icon" href="/favicon.svg"');
+    expect(html).toContain('rel="apple-touch-icon"');
+    expect(html).toContain('rel="manifest"');
+
+    // Real bytes, right dimensions — a 404 icon looks exactly like no icon.
+    const dir = join(import.meta.dirname, "../public");
+    const png = (name: string): { w: number; h: number; bytes: number } => {
+      const b = readFileSync(join(dir, name));
+      // PNG IHDR: width/height are big-endian at offsets 16 and 20.
+      return { w: b.readUInt32BE(16), h: b.readUInt32BE(20), bytes: b.length };
+    };
+    expect(png("icon-512.png")).toMatchObject({ w: 512, h: 512 });
+    expect(png("icon-192.png")).toMatchObject({ w: 192, h: 192 });
+    expect(png("apple-touch-icon.png")).toMatchObject({ w: 180, h: 180 });
+    expect(png("favicon-32.png")).toMatchObject({ w: 32, h: 32 });
+    expect(readFileSync(join(dir, "favicon.ico")).length).toBeGreaterThan(1000);
+
+    // The SVG must be self-contained: an icon that fetches a font is an icon
+    // that renders as nothing in the one place it matters.
+    const svg = readFileSync(join(dir, "favicon.svg"), "utf8");
+    expect(svg).toContain("viewBox");
+    expect(svg).not.toMatch(/@font-face|<text|font-family/);
+
+    const manifest = JSON.parse(readFileSync(join(dir, "site.webmanifest"), "utf8")) as {
+      name: string; icons: { sizes: string }[];
+    };
+    expect(manifest.name).toBe("Games With Words");
+    expect(manifest.icons.map((i) => i.sizes)).toContain("512x512");
+  });
+
   it("ships a real robots.txt and a valid sitemap", () => {
     /**
      * Both used to 200 with the SPA'S HTML, because the server's static handler
