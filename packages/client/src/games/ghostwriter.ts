@@ -74,9 +74,24 @@ function revealPanel(s: RoomState, h: ViewHelpers): HTMLElement | undefined {
   if (rev === undefined) return undefined;
 
   const ghostName = h.esc(h.nameOf(s, rev.ghostId));
-  const verdict = rev.caught === true
-    ? `<span class="badge hit">CAUGHT</span> The room got ${ghostName}.`
-    : `<span class="badge funny">ESCAPED</span> ${ghostName} walked out clean.`;
+  /**
+   * A NO_CONTEST round is not an escape.
+   *
+   * Seen in live play (2026-08-25): the Ghost never wrote an answer, the engine
+   * correctly scored the round as NO_CONTEST worth nothing to anybody — and this
+   * panel announced "ESCAPED — Vex walked out clean", congratulating a no-show
+   * for a bluff that never happened. It only looked at `caught`, so "not caught"
+   * and "never played" rendered identically.
+   *
+   * The scoreboard said 0 while the board said well done, and when two things in
+   * one screen contradict each other, the contradiction is the bug.
+   */
+  const noContest = round?.endedReason === "NO_CONTEST";
+  const verdict = noContest
+    ? `<span class="badge">NO CONTEST</span> ${ghostName} never wrote an answer — nobody scores.`
+    : rev.caught === true
+      ? `<span class="badge hit">CAUGHT</span> The room got ${ghostName}.`
+      : `<span class="badge funny">ESCAPED</span> ${ghostName} walked out clean.`;
 
   const owners = rev.owners ?? {};
   const rows = (round?.slots ?? []).map((slot) => {
