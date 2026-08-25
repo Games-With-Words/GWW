@@ -149,3 +149,51 @@ describe("fonts are vendored, not fetched", () => {
     expect(html).toMatch(/<link rel="preload"[^>]+\/fonts\/[^"]+\.woff2"[^>]*as="font"/);
   });
 });
+
+/* ---- Broadcast furniture -------------------------------------------------
+   The bars were 4vh of black top and bottom of a 16:9 UI on a 16:9 TV —
+   letterboxing a format nothing was cropped to. They now carry the clock and
+   the standings, which also fixes a layout bug: the scoreboard was rendered
+   LAST, at the bottom of a scrolling column, on a screen nobody can touch. */
+describe("the board's strips do real work", () => {
+  it("pins both strips above the content and out of the way of taps", () => {
+    for (const sel of [".tally", ".lowerthird"]) {
+      const rule = new RegExp(`\\${sel}[^{]*\\{[\\s\\S]*?\\}`).exec(css)?.[0] ?? "";
+      expect(rule, `${sel} rule`).toContain("position: fixed");
+      expect(rule).toContain("pointer-events: none");
+    }
+  });
+
+  it("keeps board content clear of both strips", () => {
+    expect(css).toMatch(/#app\.board \{[^}]*padding-top/);
+    expect(css).toMatch(/#app\.board \{[^}]*padding-bottom/);
+  });
+
+  it("renders the standings as furniture, not as the last thing in a scroll", () => {
+    expect(ts).toMatch(/function boardFurniture/);
+    expect(ts).toMatch(/for \(const strip of boardFurniture\(s\)\) app\.append\(strip\)/);
+    // The lower third is phase-aware: votes while voting, who's locked in while
+    // guessing, standings otherwise.
+    expect(ts).toContain("lt-label");
+    expect(ts).toMatch(/STANDINGS/);
+  });
+
+  it("still un-pins the composer on the board", () => {
+    // Guarded separately above too — repeated here because this describe adds
+    // new #app.board rules and that literal is easy to disturb.
+    expect(css).toContain("#app.board .composer { position: static");
+  });
+
+  it("signals the last ten seconds with a state change, not an animated shadow", () => {
+    // Was an animated 80px inset box-shadow on <body> plus a saturate() filter
+    // on #app, during the exact window guesses stream in and the clock repaints.
+    expect(css).not.toContain("pulse-bg");
+    expect(css).not.toMatch(/body\.tension #app \{[^}]*filter:/);
+    expect(css).toMatch(/body\.tension \.tally \{[\s\S]*?background: var\(--accent\)/);
+  });
+
+  it("keeps the red warning when motion is off, dropping only the pulse", () => {
+    const rm = (css.match(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\n\}/g) ?? []).join("\n");
+    expect(rm).toMatch(/body\.tension \.tally \{ animation: none/);
+  });
+});

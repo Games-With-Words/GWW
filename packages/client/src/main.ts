@@ -667,12 +667,59 @@ function audioNotice(s: RoomState): HTMLElement | undefined {
   return el2;
 }
 
+/**
+ * The two strips that were black bars.
+ *
+ * They used to be 4vh of pure black at the top and bottom of a 16:9 UI on a
+ * 16:9 TV — letterboxing a format nothing was cropped to. Cinema letterboxes
+ * because the source is wider than the frame; broadcast doesn't letterbox, it
+ * has a tally light and a lower third. So the best two strips of real estate on
+ * the television now carry the two facts people ask for all night: how long is
+ * left, and who is winning.
+ *
+ * It also fixes a layout problem: the scoreboard was rendered LAST, at the
+ * bottom of a scrolling column, on a screen nobody can touch to scroll.
+ * Standings are permanent furniture now.
+ */
+function boardFurniture(s: RoomState): HTMLElement[] {
+  const g = s.game!;
+  const round = g.round;
+  const live = g.status === "IN_ROUND";
+  const ms = msLeft(s, Date.now());
+  const secs = ms !== undefined ? Math.ceil(ms / 1000) : undefined;
+
+  const top = el(`<div class="tally">
+    <span class="onair${live ? " live" : ""}"><i></i>${live ? "ON AIR" : "STANDBY"}</span>
+    <span class="grow"></span>
+    <span class="tally-show">SAY LESS · ROUND ${g.roundIndex + 1} OF ${g.maxRounds}</span>
+    <span class="grow"></span>
+    ${secs !== undefined ? `<span class="clock${secs <= 10 ? " urgent" : ""}">${secs}s</span>` : `<span class="clock dim">—</span>`}
+  </div>`);
+
+  // The lower third answers whatever the room is currently wondering about.
+  let lower: string;
+  if (round?.phase === "BALLOT") {
+    const cast = new Set((round.votedBy ?? []).map((v) => v.voterId)).size;
+    lower = `<span class="lt-label">VOTING</span><span>${cast} of ${s.players.length} in · nobody knows who wrote what</span>`;
+  } else if (round?.phase === "GUESSING" && (round.guessedPlayerIds ?? []).length > 0) {
+    const inNames = (round.guessedPlayerIds ?? []).map((id) => nameOf(s, id)).join(" · ");
+    lower = `<span class="lt-label">LOCKED IN</span><span>${esc(inNames)}</span>`;
+  } else {
+    const board = [...s.players]
+      .map((p) => ({ name: p.displayName, n: g.scores[p.id] ?? 0 }))
+      .sort((a, b) => b.n - a.n);
+    const best = board[0]?.n ?? 0;
+    lower = `<span class="lt-label">STANDINGS</span>` + board
+      .map((r) => `<span class="lt-score${r.n === best && best > 0 ? " lead" : ""}">${esc(r.name)} <b>${r.n}</b></span>`)
+      .join("");
+  }
+  return [top, el(`<div class="lowerthird">${lower}</div>`)];
+}
+
 function renderBoardGame(s: RoomState): void {
   const g = s.game!;
   const round = g.round;
-  const clock = countdown(s);
-  app.append(el(`<div class="row"><span class="brand">Say Less</span><span class="grow"></span><span class="dim">Round ${g.roundIndex + 1}</span></div>`));
-  if (clock !== undefined) app.append(clock);
+  for (const strip of boardFurniture(s)) app.append(strip);
   const notice = audioNotice(s);
   if (notice !== undefined) app.append(notice);
   const cap = caption(s);

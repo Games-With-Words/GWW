@@ -12,7 +12,7 @@
  *
  * AA: 4.5 for normal text, 3.0 for large (>=18.66px bold or >=24px).
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -127,5 +127,63 @@ describe("the stylesheet obeys its own rule", () => {
         return b! > r! + 16 && b! > g! + 16;
       });
     expect(violets).toEqual([]);
+  });
+});
+
+/* ---- The landing page --------------------------------------------------
+   It was a separate brand: a different black (#120e1e vs #0b0b13), a violet
+   and pink palette that appears nowhere in the product, and a primary CTA
+   whose entire behaviour was `onclick="this.textContent='Coming soon'"` — the
+   front door of a LIVE product telling every visitor it did not exist. */
+describe("the landing page is the same product", () => {
+  const lp = readFileSync(join(import.meta.dirname, "../../../docs/index.html"), "utf8");
+  const lpCode = lp.replace(/<!--[\s\S]*?-->/g, "");
+
+  it("has a CTA that actually goes to the game", () => {
+    expect(lpCode).not.toMatch(/Coming soon/i);
+    expect(lpCode).not.toMatch(/onclick=/i);
+    expect(lpCode).toMatch(/href="https:\/\/games-with-words\.com\/?"/);
+  });
+
+  it("shares the product's black and its red", () => {
+    for (const token of ["#0b0b0b", "#e50914", "#ff4b55"]) {
+      expect(lpCode, `missing ${token}`).toContain(token);
+    }
+    // The old palette, gone: violet, pink, the second black.
+    for (const dead of ["#8d5cff", "#ff4fa3", "#120e1e", "#7041e7", "#ed398b"]) {
+      expect(lpCode, `${dead} still present`).not.toContain(dead);
+    }
+  });
+
+  it("loads the fonts it declares, from its own directory", () => {
+    expect(lpCode).toMatch(/@font-face/);
+    expect(lpCode).toMatch(/url\("fonts\/archivo-var\.woff2"\)/);
+    expect(lpCode).not.toMatch(/fonts\.googleapis\.com|fonts\.gstatic\.com/);
+    for (const f of ["archivo-var.woff2", "martianmono-var.woff2", "OFL-Archivo.txt"]) {
+      expect(
+        existsSync(join(import.meta.dirname, "../../../docs/fonts", f)),
+        `docs/fonts/${f}`,
+      ).toBe(true);
+    }
+  });
+
+  it("previews as something when pasted into a group chat", () => {
+    for (const tag of ["og:title", "og:description", "og:url", "twitter:card"]) {
+      expect(lpCode, `missing ${tag}`).toContain(tag);
+    }
+  });
+
+  it("guards motion, which it never did before", () => {
+    expect(lpCode).toMatch(/@media \(prefers-reduced-motion: reduce\)/);
+    // It smooth-scrolled unconditionally and lifted on hover.
+    expect(lpCode).not.toMatch(/translateY\(-2px\)/);
+  });
+
+  it("describes the game that actually shipped", () => {
+    // It advertised "eight seconds" and "Mark and Ris are in casting".
+    expect(lpCode).not.toMatch(/eight seconds/i);
+    expect(lpCode).not.toMatch(/in casting/i);
+    expect(lpCode).toMatch(/twenty words/i);
+    expect(lpCode).toMatch(/anonymous/i);
   });
 });

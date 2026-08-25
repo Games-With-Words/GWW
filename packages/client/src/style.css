@@ -266,6 +266,41 @@ footer a { color: var(--dim); }
 #app.board .scores td { font-size: 1.2rem; }
 #app.board .composer { position: static; backdrop-filter: none; }
 
+/* ---- Broadcast furniture -------------------------------------------------
+   The letterbox bars, carrying their weight. Same 4vh, same fixed layer, no
+   pointer events — but now they hold the clock and the standings instead of
+   simulating a crop nothing was cropped to. */
+.tally, .lowerthird {
+  position: fixed; left: 0; right: 0; height: 4vh; z-index: 51;
+  display: flex; align-items: center; gap: 1.6vw; padding: 0 2vw;
+  pointer-events: none; overflow: hidden;
+  font-family: var(--mono); font-weight: 700;
+  font-size: clamp(0.62rem, 1.55vh, 1rem);
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--dim);
+}
+.tally { top: 0; }
+.lowerthird { bottom: 0; gap: 1.1vw; }
+.tally-show { color: var(--ink); letter-spacing: 0.2em; }
+
+/* The tally light. Red only when the clock is actually running — light MEANS
+   something here, so a change in light is information rather than decoration. */
+.onair { display: inline-flex; align-items: center; gap: 0.5em; }
+.onair i { width: 0.62em; height: 0.62em; border-radius: 50%; background: var(--line); }
+.onair.live { color: var(--hot); }
+.onair.live i { background: var(--accent); }
+
+.tally .clock { font-size: inherit; padding: 0; color: var(--ink); font-family: var(--mono); }
+.tally .clock.urgent { color: var(--hot); }
+
+.lt-label { color: var(--dim); letter-spacing: 0.24em; flex: none; }
+.lt-score { color: var(--ink); letter-spacing: 0.06em; white-space: nowrap; }
+.lt-score b { font-weight: 800; }
+.lt-score.lead b { color: var(--hot); }
+
+/* Content clears both strips. Nothing important hides behind furniture. */
+#app.board { padding-top: 6vh; padding-bottom: 7vh; }
+
 /* Phase countdown */
 .clock {
   font-family: var(--mono); font-weight: 700; font-size: 2rem;
@@ -348,13 +383,22 @@ body.theater #app::before {
    group on exactly the hardware most likely to BE the board. Nobody ever saw
    it; everybody paid for it. */
 
-/* Tension: the last ten seconds close in */
-body.tension { animation: pulse-bg 1s ease-in-out infinite; }
-body.tension #app { filter: saturate(1.15); }
-@keyframes pulse-bg {
-  0%, 100% { box-shadow: inset 0 0 120px 40px #00000000; }
-  50% { box-shadow: inset 0 0 160px 80px #ef476f22; }
+/* Tension: the last ten seconds. The whole tally strip goes live.
+   This was an animated 80px-spread inset box-shadow on <body> at 1Hz, plus a
+   saturate() filter on #app — an expensive animated property AND a filter layer
+   promoting the entire app, during precisely the ten seconds when guesses are
+   streaming in and the clock is repainting every second. A state change on a
+   4vh strip is cheaper, scarier, and legible from across the room. */
+body.tension .tally {
+  background: var(--accent); color: var(--onfill);
+  animation: tally-pulse 1s steps(2, jump-none) infinite;
 }
+body.tension .tally .clock,
+body.tension .tally .clock.urgent,
+body.tension .tally-show,
+body.tension .onair.live { color: var(--onfill); }
+body.tension .onair.live i { background: var(--onfill); }
+@keyframes tally-pulse { 50% { background: #b0060f; } }
 
 /* Attract mode (board lobby) */
 .attract-head { text-align: center; padding: 4vh 0 1vh; }
@@ -489,7 +533,7 @@ body.tension #app { filter: saturate(1.15); }
 
 @media (prefers-reduced-motion: reduce) {
   .cine-title, .cine-word, .cine-roll, .attract-title, .attract-line { animation: none; }
-  body.tension { animation: none; }
+  body.tension .tally { animation: none; }  /* solid red stays — it is the warning */
   body.theater #app::after { display: none; }
 
   /* Every fact still present, for the full scene, with nothing moving. The
