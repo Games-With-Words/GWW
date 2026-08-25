@@ -14,6 +14,7 @@ import {
   closeBallot,
   resolveVote,
   endRound,
+  shuffleRemaining,
   EngineError,
 } from "./machine.js";
 import { STARTER_DECK } from "./deck.js";
@@ -92,7 +93,7 @@ export const sayLess: GameModule<SessionState, EngineEvent> = {
   manifest: SAY_LESS_MANIFEST,
 
   /** The host owns the round clock and adjudicates loophole votes (v0.1). */
-  hostOnlyCommands: ["round.start", "round.end", "vote.resolve"],
+  hostOnlyCommands: ["round.start", "round.end", "vote.resolve", "deck.shuffle"],
 
   createSession(players, seed) {
     return createSession(players, activeDeck, { seed });
@@ -127,6 +128,9 @@ export const sayLess: GameModule<SessionState, EngineEvent> = {
         const p = payload as EndPayload;
         return endRound(state, p.reason);
       }
+      // The host can cut the deck between rounds — see shuffleRemaining().
+      case "deck.shuffle":
+        return shuffleRemaining(state);
       default:
         throw new EngineError("UNKNOWN_COMMAND", `Say Less has no command "${name}".`);
     }
@@ -318,6 +322,8 @@ export function narrate(event: EngineEvent, nameOf: (id: string | undefined) => 
       return `R${event.roundIndex + 1} complete (${event.reason}) — the secret was "${event.secret}"${event.winnerId !== undefined ? `, winner "${nameOf(event.winnerId)}"` : ""}`;
     case "score.updated":
       return `scores: ${Object.entries(event.totals).map(([id, v]) => `${nameOf(id)}=${v}`).join(" ")}`;
+    case "deck.shuffled":
+      return `deck shuffled — ${event.remaining} card(s) still unplayed`;
     case "game.completed":
       return `GAME COMPLETE — final: ${Object.entries(event.totals).map(([id, v]) => `${nameOf(id)}=${v}`).join(" ")}`;
     default:

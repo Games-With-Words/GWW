@@ -724,6 +724,17 @@ function renderBetweenRounds(s: RoomState): void {
     const next = el(`<button class="go">Next round</button>`);
     next.addEventListener("click", () => command("round.start"));
     app.append(next);
+    /**
+     * CUT THE DECK.
+     *
+     * Decks are shuffled per game now, but a room that plays two games back to
+     * back, or one that has just seen a card it wants to skip past, should be
+     * able to cut mid-session without restarting. Host-only, between rounds
+     * only, and the engine refuses it during a live round.
+     */
+    const shuffle = el(`<button class="secondary">🔀 Shuffle the deck</button>`);
+    shuffle.addEventListener("click", () => command("deck.shuffle"));
+    app.append(shuffle);
   } else {
     app.append(el(`<p class="dim" style="text-align:center">Next round when ${esc(s.players.find((p) => p.isHost)?.displayName ?? "the host")} is ready…</p>`));
   }

@@ -220,4 +220,5 @@ export type EngineEvent =
   | { type: "round.revealed"; roundIndex: number; reveal: RoundReveal }
   | { type: "round.completed"; roundIndex: number; reason: NonNullable<RoundState["endedReason"]>; winnerId?: string; secret: string }
   | { type: "score.updated"; events: ScoreEvent[]; totals: Record<string, number> }
+  | { type: "deck.shuffled"; remaining: number }
   | { type: "game.completed"; totals: Record<string, number> };

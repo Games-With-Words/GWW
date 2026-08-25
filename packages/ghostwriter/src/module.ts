@@ -14,6 +14,7 @@ import {
   closeVotes,
   closeLastWord,
   endRound,
+  shuffleRemaining,
   EngineError,
 } from "./machine.js";
 import { STARTER_DECK } from "./deck.js";
@@ -102,7 +103,7 @@ export const ghostwriter: GameModule<SessionState, EngineEvent> = {
   manifest: GHOSTWRITER_MANIFEST,
 
   /** The host owns the round clock. Everything else is a player action. */
-  hostOnlyCommands: ["round.start", "round.end"],
+  hostOnlyCommands: ["round.start", "round.end", "deck.shuffle"],
 
   createSession(players, seed) {
     return createSession(players, activeDeck, { seed });
@@ -135,6 +136,9 @@ export const ghostwriter: GameModule<SessionState, EngineEvent> = {
         const p = payload as EndPayload;
         return endRound(state, p.reason);
       }
+      // The host can cut the deck between rounds.
+      case "deck.shuffle":
+        return shuffleRemaining(state);
       default:
         throw new EngineError("UNKNOWN_COMMAND", `Ghostwriter has no command "${name}".`);
     }
@@ -293,6 +297,8 @@ export function narrate(event: EngineEvent, nameOf: (id: string | undefined) => 
       return `R${event.roundIndex + 1} complete (${event.reason})`;
     case "score.updated":
       return `scores: ${Object.entries(event.totals).map(([id, v]) => `${nameOf(id)}=${v}`).join(" ")}`;
+    case "deck.shuffled":
+      return `deck shuffled — ${event.remaining} prompt(s) still unplayed`;
     case "game.completed":
       return `GAME COMPLETE — final: ${Object.entries(event.totals).map(([id, v]) => `${nameOf(id)}=${v}`).join(" ")}`;
     default:

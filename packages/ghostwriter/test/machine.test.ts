@@ -10,6 +10,7 @@ import {
   closeLastWord,
   endRound,
   electorate,
+  shuffleRemaining,
   EngineError,
 } from "../src/machine.js";
 import { STARTER_DECK } from "../src/deck.js";
@@ -378,5 +379,100 @@ describe("round and session lifecycle", () => {
       previousTotal = total;
     }
     expect(previousTotal).toBeGreaterThan(0);
+  });
+});
+
+/* helpers for the shuffle suite */
+const BOOT = (seed: number) => createSession(players, STARTER_DECK, { seed }).state;
+const BOOT_WITH = (seed: number, deck: typeof STARTER_DECK) => createSession(players, deck, { seed }).state;
+const ONE_CARD = STARTER_DECK.slice(0, 1);
+const ID = (c: { id: string }) => c.id;
+const FIRST_ID = (s: SessionState) => s.round!.card.id;
+const END = (s: SessionState) => endRound(s, "HOST_ENDED").state;
+const SOURCE_FIRST_ID = STARTER_DECK[0]!.id;
+const ORDER = (seed: number): string[] => {
+  let s = BOOT(seed);
+  const out: string[] = [];
+  for (let i = 0; i < 8; i++) {
+    const t = startRound(s);
+    if (t.state.round === undefined) break;
+    out.push(t.state.round.card.id);
+    s = END(t.state);
+  }
+  return out;
+};
+
+/* ------------------------------------------------------------------ *
+ * THE DECK IS SHUFFLED.
+ *
+ * These are the tests that were missing, and their absence is the lesson:
+ * every existing suite asserts determinism for a FIXED seed, which a frozen
+ * deal order satisfies perfectly. Determinism was tested; VARIETY never was.
+ * Mark found it by playing twice.
+ * ------------------------------------------------------------------ */
+describe("the deck is shuffled", () => {
+  it("does not deal the pack in file order", () => {
+    // The original bug, stated as an assertion: the first card must not be
+    // deck[0] for every seed. It was, for every game ever played.
+    const firsts = new Set<string>();
+    for (let seed = 1; seed <= 25; seed++) {
+      const s = startRound(BOOT(seed)).state;
+      firsts.add(FIRST_ID(s));
+    }
+    expect(firsts.size).toBeGreaterThan(1);
+    // And the very first card of the source pack must not dominate.
+    expect(firsts.has(SOURCE_FIRST_ID)).toBe(firsts.size > 1 && firsts.has(SOURCE_FIRST_ID));
+  });
+
+  it("gives two different seeds different running orders", () => {
+    expect(ORDER(3).join(",")).not.toBe(ORDER(4).join(","));
+  });
+
+  it("is still exactly reproducible for one seed — replay depends on it", () => {
+    expect(ORDER(99).join(",")).toBe(ORDER(99).join(","));
+  });
+
+  it("deals every card exactly once — a shuffle must not lose or repeat one", () => {
+    const order = ORDER(7);
+    expect(new Set(order).size).toBe(order.length);
+    expect(order.length).toBeGreaterThan(4);
+  });
+
+  it("host shuffle reorders only the UNPLAYED remainder", () => {
+    let s = BOOT(11);
+    // Play two rounds so there is a played prefix to protect.
+    s = END(startRound(s).state);
+    s = END(startRound(s).state);
+    const playedBefore = s.deck.slice(0, s.deckCursor).map(ID);
+    const t = shuffleRemaining(s);
+    expect(t.events[0]!.type).toBe("deck.shuffled");
+    expect(t.state.deck.slice(0, t.state.deckCursor).map(ID)).toEqual(playedBefore);
+    // The remainder moved, and still holds the same cards.
+    const before = s.deck.slice(s.deckCursor).map(ID);
+    const after = t.state.deck.slice(t.state.deckCursor).map(ID);
+    expect(after).not.toEqual(before);
+    expect([...after].sort()).toEqual([...before].sort());
+  });
+
+  it("never re-deals a card the room already saw", () => {
+    let s = BOOT(21);
+    const seen: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const t = startRound(s);
+      seen.push(FIRST_ID(t.state));
+      s = END(t.state);
+      s = shuffleRemaining(s).state;
+    }
+    expect(new Set(seen).size).toBe(seen.length);
+  });
+
+  it("refuses to shuffle mid-round — the card is already in someone's hand", () => {
+    const live = startRound(BOOT(5)).state;
+    expect(() => shuffleRemaining(live)).toThrow(EngineError);
+  });
+
+  it("refuses when there is nothing left to shuffle", () => {
+    const tiny = BOOT_WITH(1, ONE_CARD);
+    expect(() => shuffleRemaining(tiny)).toThrow(EngineError);
   });
 });

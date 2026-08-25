@@ -63,6 +63,20 @@ interface GameCase {
   players: number;
   reach(h: ReturnType<typeof harness>): void;
   action: { name: string; payload: Record<string, unknown>; idFields: string[] };
+  /**
+   * Which values inside a private view are actually SECRET.
+   *
+   * This used to be inferred — every string of 8+ characters in a private view
+   * had to be absent from the board. That passed for a year by luck: the first
+   * card's category happened to be "Family" (6 chars, under the threshold). The
+   * moment the deck got shuffled and dealt a "Mixed Chaos" card, the test called
+   * a leak on a field the board is DESIGNED to display.
+   *
+   * A private view legitimately carries public context — the category, the round
+   * index, the word limit — so which parts are secret is a rules question, and
+   * the game answers it here as test data. Guessing was never going to work.
+   */
+  secrets(view: Record<string, unknown>): string[];
 }
 
 const GAMES: GameCase[] = [
@@ -76,16 +90,24 @@ const GAMES: GameCase[] = [
       h.session.command(speaker, false, "clue.submit", { clue: "totally safe generic hint" });
     },
     action: { name: "guess.submit", payload: { value: "a wrong guess" }, idFields: ["playerId"] },
+    // The Speaker's card: the secret itself and its accepted aliases.
+    secrets: (v) => {
+      const card = (v as { card?: { secret?: string; aliases?: string[] } }).card;
+      return [card?.secret ?? "", ...(card?.aliases ?? [])].filter((x) => x.length > 0);
+    },
   },
   {
     module: ghostwriter,
     players: 4,
     reach: () => undefined,
     action: { name: "answer.submit", payload: { text: "wet socks" }, idFields: ["playerId"] },
+    // The prompt, and only the prompt. The category is public on purpose — the
+    // board shows it, which is the whole point of the ANSWERING panel.
+    secrets: (v) => [String((v as { prompt?: string }).prompt ?? "")].filter((x) => x.length > 0),
   },
 ];
 
-describe.each(GAMES)("$module.manifest.gameId under the generic runner", ({ module, players, reach, action }) => {
+describe.each(GAMES)("$module.manifest.gameId under the generic runner", ({ module, players, reach, action, secrets }) => {
   it("starts a round and reports the game's own id", () => {
     const { session } = harness(module, players);
     expect(session.gameId).toBe(module.manifest.gameId);
@@ -122,15 +144,18 @@ describe.each(GAMES)("$module.manifest.gameId under the generic runner", ({ modu
     // was told — the release blocker (spec §16), checked without knowing which
     // field is the secret.
     const boardText = JSON.stringify(sent.filter((m) => m.target === "boards"));
+    let checked = 0;
     for (const id of ids) {
       for (const view of privateTo(sent, id)) {
-        for (const value of Object.values(view as Record<string, unknown>)) {
-          // Only string leaves are worth checking; ids and booleans are public.
-          if (typeof value !== "string" || value.length < 8) continue;
-          expect(boardText.includes(value)).toBe(false);
+        for (const secret of secrets(view as Record<string, unknown>)) {
+          checked += 1;
+          expect(boardText.includes(secret), `board leaked "${secret}"`).toBe(false);
         }
       }
     }
+    // A leak test that checked nothing would pass silently — the worst outcome
+    // for the one test spec §16 calls a release blocker.
+    expect(checked).toBeGreaterThan(0);
   });
 
   it("enforces the game's declared host-only commands", () => {
