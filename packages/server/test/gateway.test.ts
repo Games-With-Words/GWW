@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { WebSocket } from "ws";
 import { createGateway, type Gateway } from "../src/gateway.js";
 import { MemoryEventLog } from "../src/log.js";
@@ -81,6 +83,31 @@ function connectWith(url: string): Promise<Client> {
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+describe("static content types", () => {
+  it("serves text, xml and jpeg as themselves, not as octet-stream", async () => {
+    /**
+     * The MIME map had gaps, and each one broke something real: .txt and .xml
+     * made robots.txt and sitemap.xml unusable, and .jpg would have delivered
+     * the share card as a binary blob — social scrapers fetch og:image, check
+     * the type, and silently show no preview when it is not an image.
+     *
+     * Asserted against the map itself rather than a live fetch, because this
+     * suite has no client dist to serve.
+     */
+    const src = readFileSync(join(import.meta.dirname, "../src/gateway.ts"), "utf8");
+    const map = /const MIME: Record<string, string> = \{[\s\S]*?\};/.exec(src)?.[0] ?? "";
+    expect(map).not.toBe("");
+    for (const [ext, type] of [
+      [".txt", "text/plain"],
+      [".xml", "application/xml"],
+      [".jpg", "image/jpeg"],
+      [".png", "image/png"],
+    ] as const) {
+      expect(map, `${ext} missing or wrong`).toMatch(new RegExp(`"\\${ext}":\\s*"${type}`));
+    }
+  });
+});
 
 describe("lobby HTTP", () => {
   it("lists the arcade with creator credit", async () => {

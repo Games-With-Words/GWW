@@ -38,16 +38,33 @@ export interface Gateway {
   close(): Promise<void>;
 }
 
+/**
+ * Content types for the static client.
+ *
+ * The gaps here were doing real damage. Anything missing fell through to
+ * application/octet-stream:
+ *  - .txt and .xml meant robots.txt and sitemap.xml were unusable even once
+ *    they existed, and before they existed the SPA fallback served them as
+ *    text/html — a crawler asking for robots.txt got a web page.
+ *  - .jpg meant the share card would have been delivered as a binary blob.
+ *    Facebook and Twitter fetch og:image and check the type; octet-stream is
+ *    not an image, so the preview silently falls back to no image at all.
+ */
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
   ".ico": "image/x-icon",
   ".woff2": "font/woff2",
   ".json": "application/json",
   ".webmanifest": "application/manifest+json",
+  ".txt": "text/plain; charset=utf-8",
+  ".xml": "application/xml; charset=utf-8",
 };
 
 export function createGateway(opts?: { log?: EventLog; now?: () => number; clientDist?: string; voice?: VoiceService }): Gateway {

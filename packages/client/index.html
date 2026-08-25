@@ -34,9 +34,124 @@
        remote families — and the board works on a TV with no DNS. -->
   <link rel="preload" href="/fonts/archivo-var.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="/src/style.css" />
+
+  <!-- STRUCTURED DATA.
+       The brand query is "games with words", which is three extremely common
+       English words — so the job is not keyword stuffing, it is telling a search
+       engine that this exact string is the NAME of a thing, and what that thing
+       contains. An arcade with named games, each with a real maker and a real
+       player count, is a far stronger claim than any amount of prose.
+       Both games are listed because the arcade IS the credits screen. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://games-with-words.com/#website",
+        "url": "https://games-with-words.com/",
+        "name": "Games With Words",
+        "alternateName": "GWW",
+        "description": "Private-room party games for the friends and family already sitting next to you.",
+        "inLanguage": "en",
+        "publisher": { "@id": "https://games-with-words.com/#org" }
+      },
+      {
+        "@type": "Organization",
+        "@id": "https://games-with-words.com/#org",
+        "name": "Interchained LLC Labs",
+        "url": "https://games-with-words.com/"
+      },
+      {
+        "@type": "ItemList",
+        "name": "The arcade",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "item": {
+              "@type": "Game",
+              "name": "Say Less",
+              "description": "Make your friends guess the secret using as few words as possible. One player writes a clue under a word budget, everyone else gets one guess, then the room votes on the funniest.",
+              "url": "https://games-with-words.com/",
+              "gamePlatform": "Web browser",
+              "playMode": "MultiPlayer",
+              "numberOfPlayers": { "@type": "QuantitativeValue", "minValue": 3, "maxValue": 12 },
+              "author": { "@type": "Person", "name": "The Oracle" },
+              "isAccessibleForFree": true
+            }
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "item": {
+              "@type": "Game",
+              "name": "Ghost Writer",
+              "description": "Everyone answers the prompt except one player, who never saw it. Read the answers out loud and find the one written blind.",
+              "url": "https://games-with-words.com/",
+              "gamePlatform": "Web browser",
+              "playMode": "MultiPlayer",
+              "numberOfPlayers": { "@type": "QuantitativeValue", "minValue": 3, "maxValue": 12 },
+              "author": { "@type": "Person", "name": "Vex" },
+              "isAccessibleForFree": true
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
-  <div id="app" aria-live="polite"></div>
+  <!--
+    THE CRAWLER USED TO GET NOTHING.
+
+    Fetching this page without JavaScript returned `<div id="app"></div>` and a
+    bundle: no heading, no game names, not one word of copy. Google can execute
+    JavaScript, but for a new domain with no authority that is a slow, best-effort
+    second pass — and every other crawler (social scrapers, Bing, LLM indexes)
+    simply saw an empty page. The brand query is three of the commonest words in
+    English; showing up for it with zero text was never going to happen.
+
+    So the shell ships real content. The app calls replaceChildren() on its first
+    render, so this is what a crawler reads and what a human sees for the ~200ms
+    before boot — the same claims either way, which is the line between
+    pre-rendering and cloaking. It is deliberately the truth about the product:
+    two named games, their real makers, their real table sizes.
+  -->
+  <div id="app" aria-live="polite">
+    <h1>Games With Words</h1>
+    <p><strong>The room is the game.</strong> Private-room party games for the friends
+      and family already sitting next to you. One person opens a room on the TV,
+      everyone else scans in with a phone, and then the stories start. No accounts,
+      no strangers, no matchmaking.</p>
+
+    <h2>The arcade</h2>
+    <p>Games With Words is an arcade — a community of games, each made by a person
+      and credited on its tile.</p>
+    <ul>
+      <li><strong>Say Less</strong>, by The Oracle — make your friends guess the secret
+        using as few words as you can. Write the clue, dodge the forbidden words,
+        then the room votes on the funniest guess. 3–12 players, 20–35 minutes.</li>
+      <li><strong>Ghost Writer</strong>, by Vex — everyone answers the prompt except one
+        player, who never saw it. Read the answers out loud and find the one that
+        was written blind. 3–12 players, 15–25 minutes.</li>
+    </ul>
+
+    <h2>How it works</h2>
+    <ol>
+      <li>Open games-with-words.com on the biggest screen in the room.</li>
+      <li>Everyone scans the QR code, or types the six-character room code.</li>
+      <li>Tap start. A random player becomes the host; the board reads the room.</li>
+    </ol>
+    <p>Free, open source under the GPLv3, and self-hostable. Built by
+      Interchained LLC Labs.</p>
+    <noscript>
+      <p><strong>Games With Words needs JavaScript to play</strong> — the board and the
+        phones talk over a live connection. Everything above is what is waiting
+        for you once it is switched on.</p>
+    </noscript>
+  </div>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
