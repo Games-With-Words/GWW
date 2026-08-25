@@ -51,7 +51,7 @@ describe("client state reducer", () => {
     let s = seeded();
     s = reduce(s, { type: "state", data: { status: "IN_ROUND", roundIndex: 0, maxRounds: 12, scores: {}, round: { index: 0, speakerId: "p1", budget: 5, phase: "AWAITING_CLUE", category: "Movies", guessCount: 0, guessedPlayerIds: [], guesses: [] } } });
     s = reduce(s, { type: "secret", data: { roundIndex: 0, budget: 5, card: { secret: "Titanic", aliases: [], category: "Movies", forbidden: ["ship"] } } });
-    expect(s.secret?.card.secret).toBe("Titanic");
+    expect(s.secret?.card?.secret).toBe("Titanic");
 
     // Same round, phase change: secret survives.
     s = reduce(s, { type: "state", data: { status: "IN_ROUND", roundIndex: 0, maxRounds: 12, scores: {}, round: { index: 0, speakerId: "p1", budget: 5, phase: "GUESSING", category: "Movies", clue: "big boat sad", guessCount: 0, guessedPlayerIds: [], guesses: [] } } });
@@ -84,12 +84,12 @@ describe("client state reducer", () => {
     let s = seeded();
     s = reduce(s, { type: "secret", data: { roundIndex: 0, budget: 5, card: { secret: "Titanic", aliases: [], category: "Movies", forbidden: ["ship"] } } });
     s = reduce(s, { type: "state", data: { status: "IN_ROUND", roundIndex: 0, maxRounds: 12, scores: {}, round: { index: 0, speakerId: "p1", budget: 5, phase: "AWAITING_CLUE", category: "Movies", guessCount: 0, guessedPlayerIds: [], guesses: [] } } });
-    expect(s.secret?.card.secret).toBe("Titanic");
+    expect(s.secret?.card?.secret).toBe("Titanic");
 
     // And a secret for round 1 must survive round 1's states but not round 2's.
     s = reduce(s, { type: "secret", data: { roundIndex: 1, budget: 5, card: { secret: "Karaoke", aliases: [], category: "Music", forbidden: ["sing"] } } });
     s = reduce(s, { type: "state", data: { status: "IN_ROUND", roundIndex: 1, maxRounds: 12, scores: {}, round: { index: 1, speakerId: "p1", budget: 5, phase: "AWAITING_CLUE", category: "Music", guessCount: 0, guessedPlayerIds: [], guesses: [] } } });
-    expect(s.secret?.card.secret).toBe("Karaoke");
+    expect(s.secret?.card?.secret).toBe("Karaoke");
     s = reduce(s, { type: "state", data: { status: "IN_ROUND", roundIndex: 2, maxRounds: 12, scores: {}, round: { index: 2, speakerId: "p2", budget: 5, phase: "AWAITING_CLUE", category: "Family", guessCount: 0, guessedPlayerIds: [], guesses: [] } } });
     expect(s.secret).toBeUndefined();
   });

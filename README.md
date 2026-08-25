@@ -18,6 +18,8 @@ conceived by Interchained & The Oracle.
 | Game | Maker | Status |
 |------|-------|--------|
 | Say Less | The Oracle | In development (flagship) |
+| Ghostwriter | Vex | In development |
+| Odd One Out | *the example* | Template for new makers |
 
 Every game ships as a package implementing the `@gww/kit` `GameModule` contract:
 a pure, deterministic, event-sourced engine the platform drives. The platform owns
@@ -27,11 +29,31 @@ lobbies, realtime sync, persistence, and voice; games own rules.
 
 | Package | Purpose |
 |---------|---------|
-| `@gww/kit` | Platform contract: `GameModule`, `GameManifest`, the arcade registry. |
+| `@gww/kit` | Platform contract: `GameModule`, `GameManifest`, the arcade registry, the conformance harness. |
 | `@gww/say-less` | Say Less — deterministic rules engine, tokenization policy, scoring, state machine, L0 starter deck. |
+| `@gww/ghostwriter` | Ghostwriter — everyone answers the prompt except one player, who never saw it. |
+| `@gww/example-game` | Odd One Out — the smallest complete game. Copy this to start your own. |
+| `@gww/server` | Lobbies, realtime gateway, the generic session runner, Ris's voice. |
+| `@gww/client` | The board and the phones. Per-game views in `src/games/`. |
+| `@gww/forge` | Content pipeline: generates and freezes validated packs. |
 
-Coming next: lobby service, realtime gateway (WebSockets, server-authoritative),
-web client, voice service (Chatterbox Turbo, cache-first), NEDB-backed event log.
+Coming next: NEDB-backed event log, voice personalization (Phase 3).
+
+## Adding a game
+
+One package, two registrations:
+
+```
+packages/my-game/                    # the engine: pure, deterministic, tested
+packages/server/src/gateway.ts       # arcade.register(myGame)
+packages/client/src/games/index.ts   # VIEWS.push(myGameView)
+```
+
+The platform gives you private lobbies with QR join, sockets, reconnects, host
+assignment, timers, the scoreboard, the event log and a voiced host. You write
+rules and two render functions. Start from `packages/example-game` and read
+[CONTRIBUTING.md](CONTRIBUTING.md) — `assertConformance` from `@gww/kit` enforces
+the house rules for you.
 
 ## Architecture invariants
 
@@ -39,6 +61,11 @@ web client, voice service (Chatterbox Turbo, cache-first), NEDB-backed event log
   novelty; it may never stop the party.
 - **Server-authoritative.** The server owns timers, scoring and round order.
   Game engines are pure functions: same seed + same commands = same session.
+  Identity comes from the authenticated socket (`actorId`), never from a payload.
+- **The platform holds no game code.** The session runner drives any `GameModule`
+  through four surfaces — `project`, `privateViews`, `effects`, `redactEvent` — so
+  a new game needs no changes to the server. There is no `switch` on a phase name
+  anywhere in `packages/server`.
 - **Deterministic rules.** Clue budgets, forbidden terms and guess matching are
   enforced by code, not by a model. Semantic loopholes go to a room vote —
   the party retains final authority.

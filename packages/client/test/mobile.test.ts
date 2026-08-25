@@ -7,7 +7,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const css = readFileSync(join(import.meta.dirname, "../src/style.css"), "utf8");
-const ts = readFileSync(join(import.meta.dirname, "../src/main.ts"), "utf8");
+// Say Less's composer and inputs moved to src/games/say-less.ts in the
+// multi-game split; the audio suites below still read main.ts, where Ris lives.
+const ts = readFileSync(join(import.meta.dirname, "../src/games/say-less.ts"), "utf8");
 
 describe("mobile invariants", () => {
   it("never lets an input fall below 16px — iOS zooms in on focus and never back out", () => {

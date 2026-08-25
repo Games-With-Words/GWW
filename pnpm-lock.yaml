@@ -27,6 +27,19 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.20.1)
 
+  packages/example-game:
+    dependencies:
+      '@gww/kit':
+        specifier: workspace:*
+        version: link:../kit
+    devDependencies:
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.20.1)
+
   packages/forge:
     dependencies:
       '@gww/say-less':
@@ -39,6 +52,19 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.20.1)
+
+  packages/ghostwriter:
+    dependencies:
+      '@gww/kit':
+        specifier: workspace:*
+        version: link:../kit
+    devDependencies:
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
@@ -73,6 +99,9 @@ importers:
       '@gww/forge':
         specifier: workspace:*
         version: link:../forge
+      '@gww/ghostwriter':
+        specifier: workspace:*
+        version: link:../ghostwriter
       '@gww/kit':
         specifier: workspace:*
         version: link:../kit

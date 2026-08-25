@@ -19,6 +19,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { createArcade, type Arcade } from "@gww/kit";
 import { sayLess } from "@gww/say-less";
+import { ghostwriter } from "@gww/ghostwriter";
 import { WebSocketServer, WebSocket } from "ws";
 import { MemoryEventLog, type EventLog } from "./log.js";
 import { RoomError, RoomStore, type Room } from "./rooms.js";
@@ -67,12 +68,20 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
    * however the room chose to begin.
    */
   function startSession(room: Room, seed: number): void {
+    // The room decided which game at creation; the runner is handed the module
+    // and stays ignorant of which one it got.
+    const module = arcade.get(room.gameId);
+    if (module === undefined) {
+      throw new SessionError("UNKNOWN_GAME", `No game "${room.gameId}" on the shelf.`);
+    }
     const s = new GameSession(
       room,
+      module,
       seed,
       log,
       {
         broadcast: (type, payload) => broadcast(room.id, type, payload),
+        toBoards: (type, payload) => toBoards(room.id, type, payload),
         toPlayer: (pid, type, payload) => toPlayer(room.id, pid, type, payload),
       },
       now,
@@ -80,12 +89,27 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
     sessions.set(room.id, s);
     presence(room);
     // Round 1 begins the moment the game starts — no second tap needed.
-    s.command("game", true, "round.start", {});
+    s.startFirstRound();
+  }
+
+  /**
+   * The minimum table size for THIS game, from its manifest.
+   *
+   * Was hardcoded at 2, which is Say Less's floor. Ghostwriter needs 3 — with two
+   * players the vote is one person choosing between their own answer and the only
+   * other one, so the game does not exist. A hardcoded floor would have let a
+   * room start an unplayable session.
+   */
+  function minPlayersFor(gameId: string): number {
+    return arcade.get(gameId)?.manifest.minPlayers ?? 2;
   }
   const joinAttempts = new Map<string, JoinAttemptWindow>();
 
   const arcade: Arcade = createArcade();
+  // THE SHELF. Adding a game is this one line plus its package — the runner
+  // below learns nothing about it.
   arcade.register(sayLess as never);
+  arcade.register(ghostwriter as never);
 
   function roomSockets(roomId: string): Map<string, Set<WebSocket>> {
     let m = sockets.get(roomId);
@@ -106,6 +130,10 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
     for (const set of roomSockets(roomId).values()) {
       for (const ws of set) send(ws, type, { data: payload });
     }
+    for (const ws of boards.get(roomId) ?? []) send(ws, type, { data: payload });
+  }
+
+  function toBoards(roomId: string, type: string, payload: unknown): void {
     for (const ws of boards.get(roomId) ?? []) send(ws, type, { data: payload });
   }
 
@@ -366,7 +394,10 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
         }
         try {
           if (sessions.has(room.id)) throw new SessionError("ALREADY_STARTED", "Game already started.");
-          if (room.players.size < 2) throw new SessionError("TOO_FEW_PLAYERS", "Need at least 2 players.");
+          const floor = minPlayersFor(room.gameId);
+          if (room.players.size < floor) {
+            throw new SessionError("TOO_FEW_PLAYERS", `${room.gameId} needs at least ${floor} players.`);
+          }
           const seed = typeof msg["seed"] === "number" ? (msg["seed"] as number) : Math.floor(Math.random() * 2 ** 31);
           const chosen = rooms.assignRandomHost(room);
           glog("game", `${room.shortCode} STARTED FROM THE BOARD — random host: "${chosen?.displayName ?? "?"}", seed=${seed}, ${room.players.size} players`);
@@ -406,12 +437,14 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
         isHost: player.isHost,
         roomState: room.state,
         gameId: room.gameId,
-        snapshot: session?.snapshot(),
+        snapshot: session?.snapshot(player.id),
       },
     });
     presence(room);
-    // Reconnecting Speaker gets their card back — and only the Speaker.
-    session?.resendSecretIfSpeaker(player.id);
+    // A reconnecting player gets whatever is privately theirs — the Speaker's
+    // card, the Ghost's assignment, the prompt they are allowed to see. The
+    // gateway does not know which, and does not need to.
+    session?.redeliverPrivate(player.id);
 
     ws.on("message", (raw) => {
       let msg: Record<string, unknown>;
@@ -427,7 +460,10 @@ export function createGateway(opts?: { log?: EventLog; now?: () => number; clien
           // Any player may start the game; the HOST is then picked at random —
           // hosting is a job the room assigns, not a reward for scanning first.
           if (sessions.has(room.id)) throw new SessionError("ALREADY_STARTED", "Game already started.");
-          if (room.players.size < 2) throw new SessionError("TOO_FEW_PLAYERS", "Need at least 2 players.");
+          const floor = minPlayersFor(room.gameId);
+          if (room.players.size < floor) {
+            throw new SessionError("TOO_FEW_PLAYERS", `${room.gameId} needs at least ${floor} players.`);
+          }
           const seed = typeof msg["seed"] === "number" ? (msg["seed"] as number) : Math.floor(Math.random() * 2 ** 31);
           const chosen = rooms.assignRandomHost(room);
           glog("game", `${room.shortCode} STARTED by "${player.displayName}" — random host: "${chosen?.displayName ?? "?"}", seed=${seed}, ${room.players.size} players`);

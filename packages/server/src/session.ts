@@ -1,23 +1,38 @@
 /**
  * Server-authoritative game session runner (spec §09).
  *
- * Owns: the game module's state, command validation by ROLE (never trust a
- * payload's identity claims), server timers, the event log, and — critically —
- * SECRET ISOLATION: full card contents go only to the Speaker's private
- * channel; everyone else sees redacted public state. A leaked secret is a
- * release blocker (spec §16), so redaction lives here in one choke point.
+ * Owns: a game module's state, command authorization, server timers, the event
+ * log, and — critically — SECRET ISOLATION, which stays a single choke point
+ * here even though the redaction RULES now live inside each game.
+ *
+ * MULTI-GAME (2026-08-24, Mark: "make the engine capable of being multi-game").
+ * This file used to import `sayLess` and hardcode its vocabulary: which fields
+ * publicRound() may copy, that the secret goes to `round.speakerId`, that a dead
+ * clock in GUESSING means "open the ballot". A second game could satisfy the
+ * whole kit contract and still not run, because the runner underneath knew
+ * exactly one game.
+ *
+ * Now it holds a GameModule it was handed, and knows nothing else about it:
+ *   what a device may see       -> module.project(state, ctx)
+ *   who must be told what       -> module.privateViews(state), delivered on change
+ *   which clock, and what next  -> module.effects(state, event).timer.onExpire
+ *   what may cross the wire     -> module.redactEvent(event)
+ *   who may send a command      -> module.hostOnlyCommands + an injected actorId
+ *
+ * There is no switch on a phase name and no game id anywhere below.
  */
 
-import { sayLess } from "@gww/say-less";
-import type { EngineEvent, RoundState, SessionState } from "@gww/say-less";
+import type { GameModule, TimerSpec } from "@gww/kit";
 import type { EventLog } from "./log.js";
 import { glog } from "./logger.js";
 import type { Room } from "./rooms.js";
 
 export interface SessionCallbacks {
-  /** Broadcast a public event envelope payload to every device in the room. */
+  /** Broadcast to every device in the room — players and boards. */
   broadcast(type: string, payload: unknown): void;
-  /** Deliver a private message to exactly one player's device(s). */
+  /** Send to the display boards only (they get the no-viewer projection). */
+  toBoards(type: string, payload: unknown): void;
+  /** Deliver to exactly one player's device(s). */
   toPlayer(playerId: string, type: string, payload: unknown): void;
 }
 
@@ -27,77 +42,42 @@ export class SessionError extends Error {
   }
 }
 
-/** Public projection of a round — no card contents until the round completes. */
-function publicRound(round: RoundState | undefined) {
-  if (round === undefined) return undefined;
-  return {
-    index: round.index,
-    speakerId: round.speakerId,
-    budget: round.budget,
-    phase: round.phase,
-    category: round.card.category,
-    clue: round.clue,
-    guessCount: round.guesses.length,
-    // WHO has answered is public — the room needs "waiting on two more".
-    guessedPlayerIds: round.guesses.map((g) => g.playerId),
-    // WHAT they answered is NOT, until the round is over.
-    //
-    // The guess feed used to broadcast playerId + value live, because wrong
-    // guesses are half the comedy (spec §04). That is still true — but the
-    // community ballot is anonymous, and a live feed naming every author makes
-    // the anonymity pure theatre. The comedy now lands at the reveal, all at
-    // once, which is a better beat anyway.
-    guesses: round.phase === "COMPLETE"
-      ? round.guesses.map((g) => ({ playerId: g.playerId, value: g.value, correct: g.correct }))
-      : [],
-    winnerId: round.winnerId,
-    endedReason: round.endedReason,
-    // The ANONYMIZED ballot. ballotOwners is deliberately absent — the owner
-    // map never crosses the wire until it arrives inside `reveal`.
-    ...(round.ballot !== undefined ? { ballot: round.ballot } : {}),
-    votedBy: round.votes.map((v) => ({ voterId: v.voterId, category: v.category })),
-    ...(round.reveal !== undefined ? { reveal: round.reveal } : {}),
-    // The card's reveal line goes public the moment the round completes.
-    ...(round.phase === "COMPLETE" ? { revealLine: round.card.revealLine } : {}),
-  };
-}
-
-/** Public projection of the whole session — NEVER includes the deck. */
-export function publicState(state: SessionState) {
-  return {
-    status: state.status,
-    roundIndex: state.roundIndex,
-    maxRounds: state.config.maxRounds,
-    scores: state.scores,
-    round: publicRound(state.round),
-  };
-}
+/** The actor id used for platform-initiated commands (timers, auto-start). */
+export const SYSTEM_ACTOR = "game";
 
 export class GameSession {
-  private state: SessionState;
+  private state: unknown;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  /** Server-time deadline of the active phase timer, for client countdowns. */
+  private deadline: number | undefined;
+  /**
+   * Last private payload delivered to each player, as JSON.
+   *
+   * Delivery is diff-based: after every transition the runner asks the game who
+   * should currently know what, and sends only what changed. That single decision
+   * replaced the old resendSecretIfSpeaker special case, and it means a game
+   * never has to think about reconnects, second tabs or delivery timing — it
+   * describes what is true and the platform makes it so.
+   */
+  private lastPrivate = new Map<string, string>();
 
   constructor(
     private room: Room,
+    private module: GameModule,
     seed: number,
     private log: EventLog,
     private callbacks: SessionCallbacks,
     private now: () => number = () => Date.now(),
-    private clueTimeoutMs = 45_000,
-    private guessTimeoutMs = 60_000,
-    private ballotTimeoutMs = 15_000,
   ) {
-    const players = [...room.players.values()].map((p) => ({
-      id: p.id,
-      displayName: p.displayName,
-    }));
-    const t = sayLess.createSession(players, seed);
+    const players = [...room.players.values()].map((p) => ({ id: p.id, displayName: p.displayName }));
+    const t = this.module.createSession(players, seed);
     this.state = t.state;
-    this.record("game", t.events);
+    this.record(SYSTEM_ACTOR, t.events);
   }
 
-  private timer: ReturnType<typeof setTimeout> | undefined;
-  /** Server-time deadline of the active phase timer, for client countdowns. */
-  private deadline: number | undefined;
+  get gameId(): string {
+    return this.module.manifest.gameId;
+  }
 
   private clearTimer(): void {
     if (this.timer !== undefined) clearTimeout(this.timer);
@@ -106,37 +86,23 @@ export class GameSession {
   }
 
   /**
-   * What a expiring clock means depends on WHICH phase is running.
+   * Arm a clock whose expiry sends a command the GAME named.
    *
-   * Before the rework every timeout ended the round. Now a guessing timeout
-   * opens the ballot (the round is not over — the room still votes on what
-   * came in) and a ballot timeout closes it, counting whatever arrived.
+   * The runner neither knows nor cares what `onExpire` means. If the phase has
+   * already moved on by the time it fires, the engine throws a coded error and
+   * the throw is swallowed — the same tolerance the say-less-specific version
+   * had, for the same reason: a clock firing into a finished round is normal.
    */
-  private onDeadline(): void {
-    const phase = this.state.round?.phase;
-    if (phase === "GUESSING") {
-      this.apply("game", (s) => sayLess.command(s, "guessing.close", {}, this.now()));
-      return;
-    }
-    if (phase === "BALLOT") {
-      this.apply("game", (s) => sayLess.command(s, "ballot.close", {}, this.now()));
-      return;
-    }
-    this.apply("game", (s) => sayLess.command(s, "round.end", { reason: "TIMEOUT" }, this.now()));
-  }
-
-  private armTimer(ms: number): void {
+  private armTimer(spec: TimerSpec): void {
     this.clearTimer();
-    this.deadline = this.now() + ms;
+    this.deadline = this.now() + spec.ms;
     this.timer = setTimeout(() => {
       try {
-        if (this.state.status === "IN_ROUND") {
-          this.onDeadline();
-        }
+        this.dispatch(SYSTEM_ACTOR, spec.onExpire, (spec.payload ?? {}) as Record<string, unknown>);
       } catch {
-        /* round already ended between fire and handling — nothing to do */
+        /* phase already moved on between arm and fire — nothing to do */
       }
-    }, ms);
+    }, spec.ms);
     // Never hold the process open for a party timer.
     if (typeof this.timer.unref === "function") this.timer.unref();
   }
@@ -146,162 +112,121 @@ export class GameSession {
     return this.room.players.get(playerId)?.displayName ?? playerId;
   }
 
-  /** One narration line per engine event. The secret stays dark until reveal. */
-  private narrate(e: EngineEvent): void {
-    const code = this.room.shortCode;
-    switch (e.type) {
-      case "game.started":
-        glog("game", `${code} game.started (${e.playerIds.length} players)`); return;
-      case "round.started":
-        glog("game", `${code} R${e.roundIndex + 1} started — speaker "${this.name(e.speakerId)}", card ${e.cardId}, ${e.budget}-word budget (secret withheld from log until reveal)`); return;
-      case "clue.submitted":
-        glog("game", `${code} R${e.roundIndex + 1} clue submitted by "${this.name(e.speakerId)}": "${e.clue}"`); return;
-      case "clue.accepted":
-        glog("game", `${code} R${e.roundIndex + 1} clue ACCEPTED (${e.wordCount} words) — guessing open`); return;
-      case "clue.rejected":
-        glog("game", `${code} R${e.roundIndex + 1} clue REJECTED (${e.reason}): ${e.detail}`); return;
-      case "clue.flagged":
-        glog("game", `${code} R${e.roundIndex + 1} clue FLAGGED — loophole vote: ${e.reason}`); return;
-      case "guess.submitted":
-        glog("game", `${code} R${e.roundIndex + 1} guess by "${this.name(e.playerId)}": "${e.value}"`); return;
-      case "guess.accepted":
-        glog("game", `${code} R${e.roundIndex + 1} CORRECT — "${this.name(e.playerId)}" got it!`); return;
-      case "round.completed":
-        glog("game", `${code} R${e.roundIndex + 1} complete (${e.reason}) — the secret was "${e.secret}"${e.winnerId !== undefined ? `, winner "${this.name(e.winnerId)}"` : ""}`); return;
-      case "score.updated":
-        glog("game", `${code} scores: ${Object.entries(e.totals).map(([id, v]) => `${this.name(id)}=${v}`).join(" ")}`); return;
-      case "game.completed":
-        glog("game", `${code} GAME COMPLETE — final: ${Object.entries(e.totals).map(([id, v]) => `${this.name(id)}=${v}`).join(" ")}`); return;
+  /** Log every event in full, narrate it, and put only the redacted form on the wire. */
+  private record(actorId: string, events: unknown[]): void {
+    for (const e of events) {
+      const line = this.module.narrate?.(e, (id) => this.name(id));
+      if (line !== undefined) glog("game", `${this.room.shortCode} ${line}`);
+
+      // The log keeps the FULL event. Redaction is a wire concern.
+      const type = (e as { type?: string }).type ?? "event";
+      this.log.append(this.room.id, actorId, type, e, this.now());
+
+      const wire = this.module.redactEvent?.(e) ?? e;
+      if (wire !== undefined) this.callbacks.broadcast("event", wire);
+
+      const fx = this.module.effects?.(this.state, e);
+      if (fx?.clearTimer === true) this.clearTimer();
+      if (fx?.timer !== undefined) this.armTimer(fx.timer);
+      if (fx?.cue !== undefined) this.callbacks.toBoards("cue", { cue: fx.cue });
+    }
+    this.pushState();
+    this.pushPrivate();
+  }
+
+  /**
+   * Send each device its own projection.
+   *
+   * Boards get the no-viewer projection, which is the strictest view a game
+   * offers — a board is a television in a room full of players, so "nobody in
+   * particular is watching" is both the correct and the safest frame for it.
+   */
+  private pushState(): void {
+    this.callbacks.toBoards("state", this.snapshot());
+    for (const pid of this.room.players.keys()) {
+      this.callbacks.toPlayer(pid, "state", this.snapshot(pid));
+    }
+  }
+
+  /** Deliver private views that changed since last time. */
+  private pushPrivate(): void {
+    const views = this.module.privateViews?.(this.state) ?? {};
+    for (const [pid, value] of Object.entries(views)) {
+      const encoded = JSON.stringify(value);
+      if (this.lastPrivate.get(pid) === encoded) continue;
+      this.lastPrivate.set(pid, encoded);
+      /**
+       * The wire type stays "secret", not "private".
+       *
+       * It was tempting to rename it now that the payload is any game's private
+       * view rather than specifically a card. But "secret" is the established
+       * protocol word: the client reducer keys on it, and gateway.test.ts asserts
+       * on it as part of the secret-isolation release blocker. Renaming would
+       * have meant editing a leak test in the same commit that rewrites the leak
+       * path — exactly the edit you never want to see in that diff. The name is
+       * also still accurate: this is the channel for things one player may know.
+       */
+      this.callbacks.toPlayer(pid, "secret", value);
+    }
+    // A player who no longer has anything private (round over) is forgotten, so
+    // next round's view counts as a change and gets delivered.
+    for (const pid of [...this.lastPrivate.keys()]) {
+      if (!(pid in views)) this.lastPrivate.delete(pid);
     }
   }
 
   /**
-   * Public projection of an EVENT.
-   *
-   * The log keeps the full event; the wire gets a redacted one. `guess.submitted`
-   * carries playerId AND value, which would hand every device the exact
-   * authorship the anonymous ballot exists to hide — a state-level redaction
-   * alone is not enough when the event stream says the same thing out loud.
+   * Apply a command. Identity is the AUTHENTICATED actor, always injected as
+   * `actorId`, so a payload's identity claims can never be believed.
    */
-  private publicEvent(e: EngineEvent): EngineEvent | { type: string; [k: string]: unknown } {
-    if (e.type === "guess.submitted") {
-      // Who answered, not what. The text lands at the reveal, all at once.
-      return { type: e.type, roundIndex: e.roundIndex, playerId: e.playerId };
-    }
-    if (e.type === "guess.accepted") {
-      // "Somebody got it" would tell the room which ballot slot is correct
-      // before they vote on CLOSEST. Withhold until the reveal.
-      return { type: e.type, roundIndex: e.roundIndex };
-    }
-    return e;
-  }
-
-  /** Append engine events to the log and broadcast them (public payloads only). */
-  private record(actorId: string, events: EngineEvent[]): void {
-    for (const e of events) {
-      this.narrate(e);
-      this.log.append(this.room.id, actorId, e.type, e, this.now());
-      this.callbacks.broadcast("event", this.publicEvent(e));
-      if (e.type === "round.started") this.afterRoundStarted();
-      if (e.type === "clue.accepted") this.armTimer(this.guessTimeoutMs);
-      // The ballot gets its own, much shorter clock — a vote is a reflex, not
-      // a deliberation, and party games die on dead time.
-      if (e.type === "ballot.opened") this.armTimer(this.ballotTimeoutMs);
-      if (e.type === "round.completed" || e.type === "game.completed") this.clearTimer();
-    }
-    this.callbacks.broadcast("state", this.snapshot());
-  }
-
-  /** Private delivery of the secret card to the Speaker only (spec §04 step 2). */
-  private afterRoundStarted(): void {
-    const round = this.state.round;
-    if (round === undefined) return;
-    this.callbacks.toPlayer(round.speakerId, "secret", {
-      roundIndex: round.index,
-      card: {
-        secret: round.card.secret,
-        aliases: round.card.aliases,
-        category: round.card.category,
-        forbidden: round.card.forbidden,
-        revealLine: round.card.revealLine,
-      },
-      budget: round.budget,
-    });
-    this.armTimer(this.clueTimeoutMs);
-  }
-
-  private apply(actorId: string, fn: (s: SessionState) => { state: SessionState; events: EngineEvent[] }): void {
-    const t = fn(this.state);
+  private dispatch(actorId: string, name: string, payload: Record<string, unknown>): void {
+    const t = this.module.command(this.state, name, { ...payload, actorId }, this.now());
     this.state = t.state;
     this.record(actorId, t.events);
   }
 
   /**
-   * Handle a client command. Identity comes from the AUTHENTICATED player id
-   * on the socket — payload identity claims are ignored by construction.
+   * Handle a client command.
+   *
+   * Two authorization rules, both game-agnostic: the host gate is whatever the
+   * game declared in `hostOnlyCommands`, and everything else is the engine's own
+   * business — it receives the real actor and throws if that actor may not act.
+   * The runner deliberately does NOT pre-validate roles it cannot know (who the
+   * Speaker is, who the Ghost is); that check belongs where the state lives.
    */
   command(playerId: string, isHost: boolean, name: string, payload: Record<string, unknown>): void {
-    const now = this.now();
-    switch (name) {
-      case "round.start": {
-        if (!isHost) throw new SessionError("HOST_ONLY", "Only the host starts rounds.");
-        this.apply(playerId, (s) => sayLess.command(s, "round.start", {}, now));
-        return;
-      }
-      case "clue.submit": {
-        const round = this.state.round;
-        if (round === undefined || playerId !== round.speakerId) {
-          throw new SessionError("NOT_SPEAKER", "Only the Speaker may submit a clue.");
-        }
-        const clue = String(payload["clue"] ?? "");
-        this.apply(playerId, (s) => sayLess.command(s, "clue.submit", { speakerId: playerId, clue }, now));
-        return;
-      }
-      case "guess.submit": {
-        const value = String(payload["value"] ?? "");
-        this.apply(playerId, (s) => sayLess.command(s, "guess.submit", { playerId, value }, now));
-        return;
-      }
-      case "ballot.vote": {
-        // The voter is ALWAYS the connected player — never taken from the
-        // payload, or one phone could cast another player's ballot.
-        const category = payload["category"] === "CLOSEST" ? "CLOSEST" : "FUNNIEST";
-        const slotId = String(payload["slotId"] ?? "");
-        this.apply(playerId, (s) =>
-          sayLess.command(s, "ballot.vote", { voterId: playerId, category, slotId }, now));
-        return;
-      }
-      case "vote.resolve": {
-        if (!isHost) throw new SessionError("HOST_ONLY", "Only the host resolves votes in v0.1.");
-        const allow = payload["allow"] === true;
-        this.apply(playerId, (s) => sayLess.command(s, "vote.resolve", { allow }, now));
-        return;
-      }
-      case "round.end": {
-        if (!isHost) throw new SessionError("HOST_ONLY", "Only the host may end a round.");
-        this.apply(playerId, (s) => sayLess.command(s, "round.end", { reason: "HOST_ENDED" }, now));
-        return;
-      }
-      default:
-        throw new SessionError("UNKNOWN_COMMAND", `Unknown command "${name}".`);
+    if ((this.module.hostOnlyCommands ?? []).includes(name) && !isHost) {
+      throw new SessionError("HOST_ONLY", `Only the host may send "${name}".`);
     }
+    this.dispatch(playerId, name, payload);
+  }
+
+  /** Start the first round on behalf of the room. */
+  startFirstRound(): void {
+    this.dispatch(SYSTEM_ACTOR, "round.start", {});
   }
 
   /** Redacted state for join/reconnect snapshots (with the phase deadline). */
-  snapshot() {
-    return { ...publicState(this.state), deadline: this.deadline, serverTime: this.now() };
+  snapshot(viewerId?: string) {
+    const view = this.module.project(this.state, viewerId === undefined ? { isBoard: true } : { viewerId });
+    return { ...(view as object), deadline: this.deadline, serverTime: this.now() };
   }
 
-  /** Re-deliver the secret to a reconnecting Speaker — and ONLY the Speaker. */
-  resendSecretIfSpeaker(playerId: string): void {
-    const round = this.state.round;
-    if (round !== undefined && round.phase !== "COMPLETE" && round.speakerId === playerId) {
-      this.afterRoundStarted();
-    }
+  /**
+   * Re-deliver this player's private view, if they have one.
+   *
+   * Replaces resendSecretIfSpeaker(). A reconnecting player is just a player
+   * whose last-delivered view is unknown, so forgetting the cache entry and
+   * re-pushing is the entire implementation — and it works for any game's notion
+   * of who deserves a private channel.
+   */
+  redeliverPrivate(playerId: string): void {
+    this.lastPrivate.delete(playerId);
+    this.pushPrivate();
   }
 
-  get status() {
-    return this.state.status;
+  get status(): string {
+    return String((this.state as { status?: unknown }).status ?? "UNKNOWN");
   }
 
   dispose(): void {

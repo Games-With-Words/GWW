@@ -12,7 +12,6 @@ import { scenes, score } from "./cinema.js";
 import { api, openSocket, type CreatedRoom, type GameTile, type Socket } from "./api.js";
 import {
   amHost,
-  hasGuessed,
   initialRoom,
   joinUrl,
   msLeft,
@@ -21,6 +20,7 @@ import {
   roleOf,
   type RoomState,
 } from "./state.js";
+import { viewFor, type ViewHelpers } from "./games/index.js";
 
 declare const __BUILD__: string;
 // A stale cached bundle cost us a debugging session — the build now announces
@@ -44,6 +44,29 @@ let asBoard = false;
 let busy = false;
 let formError = "";
 let ticker: ReturnType<typeof setInterval> | undefined;
+/**
+ * Which game this room is playing, from the server's hello.
+ *
+ * The client used to have no need for this — there was one game, so every render
+ * path could assume Say Less. It is now the key into the view registry, and the
+ * lobby reads the matching tile for the real minimum table size.
+ */
+let gameId = "";
+let tiles: GameTile[] = [];
+
+/** Everything a game view is allowed to reach for. */
+const helpers: ViewHelpers = {
+  el,
+  esc,
+  command,
+  nameOf,
+  amHost,
+  scores: scoreCard,
+};
+
+function currentView() {
+  return viewFor(gameId);
+}
 
 /* ------------------------------------------------------------------ boot */
 
@@ -56,12 +79,15 @@ function parseHash(): void {
 
 async function boot(): Promise<void> {
   parseHash();
+  // Fetch the shelf even when joining by link: a phone that lands straight in a
+  // room still needs the manifest to know the game's real minimum table size.
+  try {
+    tiles = await api.games();
+  } catch {
+    tiles = [];
+  }
   if (screen.kind === "home") {
-    try {
-      screen = { kind: "home", games: await api.games() };
-    } catch {
-      screen = { kind: "home", games: [] };
-    }
+    screen = { kind: "home", games: tiles };
   }
   render();
 }
@@ -79,8 +105,9 @@ function connect(rid: string, token: string, board: boolean): void {
       if (msg.type === "hello") {
         const d = msg["data"] as {
           playerId?: string; isHost?: boolean; board?: boolean;
-          roomState: string; snapshot?: unknown;
+          roomState: string; snapshot?: unknown; gameId?: string;
         };
+        if (typeof d.gameId === "string" && d.gameId !== "") gameId = d.gameId;
         room = initialRoom(d.playerId ?? "board", d.isHost ?? false, d.roomState, d.board === true);
         if (d.snapshot !== undefined && d.snapshot !== null) {
           room = reduce(room, { type: "state", data: d.snapshot });
@@ -503,120 +530,6 @@ function renderBoardLobby(s: RoomState): void {
   }
 }
 
-/**
- * Who has answered, without saying WHAT — the tension without the spoiler.
- * Shown while guessing; the words themselves land at the reveal.
- */
-function answeredSoFar(s: RoomState): HTMLElement | undefined {
-  const round = s.game?.round;
-  if (round === undefined || round.phase !== "GUESSING") return undefined;
-  const total = s.players.length - 1;
-  const done = round.guessedPlayerIds;
-  if (done.length === 0) return undefined;
-  return el(`<div class="card"><h2>Locked in · ${done.length}/${total}</h2><ul class="playerlist">${done
-    .map((id) => `<li><span class="dot"></span><span class="grow">${esc(nameOf(s, id))}</span><span class="dim small">answered</span></li>`)
-    .join("")}</ul></div>`);
-}
-
-/** The anonymous ballot as the BOARD shows it — big, unattributed. */
-function ballotBoard(s: RoomState): HTMLElement | undefined {
-  const round = s.game?.round;
-  if (round?.ballot === undefined || round.phase !== "BALLOT") return undefined;
-  const cast = round.votedBy?.length ?? 0;
-  return el(`<div class="card stack">
-    <h2>The guesses — vote on your phone</h2>
-    <ul class="ballot">${round.ballot
-      .map((b) => `<li class="ballotrow"><span class="slot">${esc(b.text)}</span></li>`)
-      .join("")}</ul>
-    <div class="budget">${cast} vote${cast === 1 ? "" : "s"} in · nobody knows who wrote what</div>
-  </div>`);
-}
-
-/** The reveal: who wrote what, who was right, who the room picked. */
-function revealPanel(s: RoomState): HTMLElement | undefined {
-  const round = s.game?.round;
-  const rev = round?.reveal;
-  if (rev === undefined) return undefined;
-  const winners = (list: { slotId: string; playerId: string; votes: number }[]): string =>
-    list.length === 0
-      ? `<span class="dim">no votes</span>`
-      : list.map((w) => `${esc(nameOf(s, w.playerId))} <span class="dim">(${w.votes})</span>`).join(" &amp; ");
-  const rows = (round?.guesses ?? []).map((g) => {
-    const funny = rev.funniest.some((w) => w.playerId === g.playerId);
-    const close = rev.closest.some((w) => w.playerId === g.playerId);
-    const badges = [g.correct ? `<span class="badge hit">CORRECT</span>` : "",
-      funny ? `<span class="badge funny">FUNNIEST</span>` : "",
-      close ? `<span class="badge close">CLOSEST</span>` : ""].join("");
-    return `<li class="${g.correct ? "hit" : "miss"}"><b>${esc(nameOf(s, g.playerId))}</b> ${esc(g.value)} ${badges}</li>`;
-  }).join("");
-  return el(`<div class="card stack">
-    <h2>The reveal</h2>
-    <ul class="guessfeed">${rows}</ul>
-    <div class="budget">Funniest: ${winners(rev.funniest)} · Closest: ${winners(rev.closest)}</div>
-  </div>`);
-}
-
-/**
- * The phone ballot: every guess, two buttons each.
- *
- * Own guess is disabled — the server rejects a self-vote anyway, but a button
- * that errors is worse than one that is visibly not for you. A cast vote greys
- * its whole category so you can see what you already did.
- */
-function ballotPhone(s: RoomState): HTMLElement | undefined {
-  const round = s.game?.round;
-  if (round?.ballot === undefined || round.phase !== "BALLOT") return undefined;
-
-  const isSpeaker = round.speakerId === s.playerId;
-  const myGuess = round.guessedPlayerIds.includes(s.playerId);
-  const castF = round.votedBy?.some((v) => v.voterId === s.playerId && v.category === "FUNNIEST") === true;
-  const castC = round.votedBy?.some((v) => v.voterId === s.playerId && v.category === "CLOSEST") === true;
-
-  const wrap = el(`<div class="card stack">
-    <h2>Vote</h2>
-    <p class="dim small">Nobody can see who wrote what. ${isSpeaker
-      ? "You know the answer, so you only pick the funniest."
-      : "Pick the funniest and the closest."}</p>
-    <ul class="ballot" id="rows"></ul>
-  </div>`);
-  const rows = wrap.querySelector("#rows")!;
-
-  for (const b of round.ballot) {
-    // We cannot know which slot is ours from the ballot alone — by design.
-    // The server refuses a self-vote; this is belt-and-braces for the case
-    // where a player has a guess in play at all.
-    const row = el(`<li class="ballotrow">
-      <span class="slot">${esc(b.text)}</span>
-      <span class="votebtns">
-        <button class="vote funny" data-cat="FUNNIEST" data-slot="${esc(b.slotId)}"${castF ? " disabled" : ""}>😂</button>
-        ${isSpeaker ? "" : `<button class="vote close" data-cat="CLOSEST" data-slot="${esc(b.slotId)}"${castC ? " disabled" : ""}>🎯</button>`}
-      </span>
-    </li>`);
-    rows.append(row);
-  }
-  rows.querySelectorAll("button.vote").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const el2 = btn as HTMLButtonElement;
-      command("ballot.vote", { category: el2.dataset["cat"], slotId: el2.dataset["slot"] });
-    });
-  });
-
-  const need = [castF ? "" : "funniest", isSpeaker || castC ? "" : "closest"].filter(Boolean);
-  wrap.append(el(`<div class="budget">${need.length === 0
-    ? "Votes in. Waiting on the room…"
-    : `Still to pick: ${need.join(" and ")}`}</div>`));
-  void myGuess;
-  return wrap;
-}
-
-function guessFeed(s: RoomState): HTMLElement | undefined {
-  const guesses = s.game?.round?.guesses ?? [];
-  if (guesses.length === 0) return undefined;
-  return el(`<div class="card"><h2>Guesses</h2><ul class="guessfeed">${guesses
-    .map((g) => `<li class="${g.correct ? "hit" : "miss"}"><b>${esc(nameOf(s, g.playerId))}</b> ${esc(g.value)} ${g.correct ? "✓" : "✗"}</li>`)
-    .join("")}</ul></div>`);
-}
-
 /** Loud, tappable notice when the browser is refusing to let Ris speak. */
 function audioNotice(s: RoomState): HTMLElement | undefined {
   if (!s.isBoard || !audioBlocked) return undefined;
@@ -631,35 +544,24 @@ function audioNotice(s: RoomState): HTMLElement | undefined {
 
 function renderBoardGame(s: RoomState): void {
   const g = s.game!;
-  const round = g.round;
+  const view = currentView();
   const clock = countdown(s);
-  app.append(el(`<div class="row"><span class="brand">Say Less</span><span class="grow"></span><span class="dim">Round ${g.roundIndex + 1}</span></div>`));
+  app.append(el(`<div class="row"><span class="brand">${esc(view.title)}</span><span class="grow"></span><span class="dim">Round ${g.roundIndex + 1}</span></div>`));
   if (clock !== undefined) app.append(clock);
   const notice = audioNotice(s);
   if (notice !== undefined) app.append(notice);
   const cap = caption(s);
   if (cap !== undefined) app.append(cap);
 
-  if (round !== undefined && round.phase !== "COMPLETE") {
-    if (round.phase === "AWAITING_CLUE") {
-      app.append(el(`<div class="card reveal"><h2>${esc(nameOf(s, round.speakerId))} is composing a clue…</h2><p class="dim">Category: ${esc(round.category)} · up to ${round.budget} words</p></div>`));
-    } else {
-      app.append(el(`<div class="card"><div class="cluebox">“${esc(round.clue ?? "")}”</div><div class="budget">— ${esc(nameOf(s, round.speakerId))}${round.phase === "VOTING" ? " · LOOPHOLE VOTE IN PROGRESS" : ""}</div></div>`));
-      const bb = ballotBoard(s);
-      if (bb !== undefined) app.append(bb);
-      const answered = answeredSoFar(s);
-      if (answered !== undefined) app.append(answered);
-    }
-    const feed = guessFeed(s);
-    if (feed !== undefined) app.append(feed);
-  } else if (s.lastReveal !== undefined) {
-    app.append(el(`<div class="card reveal stack">
-      <div class="small dim">THE ANSWER WAS</div>
-      <div class="word">${esc(s.lastReveal.secret)}</div>
-      ${round?.revealLine !== undefined ? `<div class="dim revealline">“${esc(round.revealLine)}”</div>` : ""}
-      <div class="dim">${s.lastReveal.winnerId !== undefined ? `${esc(nameOf(s, s.lastReveal.winnerId))} got it!` : s.lastReveal.reason === "TIMEOUT" ? "Nobody got it." : "Round scrapped."}</div>
-    </div>`));
-  }
+  // The board's round area belongs to the game. Between rounds it gets its own
+  // panel, falling back to the phone's reveal when a game only wrote one.
+  const round = g.round;
+  const live = round !== undefined && round.phase !== "COMPLETE";
+  const nodes = live
+    ? view.board(s, helpers)
+    : (view.boardReveal ?? view.betweenRounds)(s, helpers);
+  for (const n of nodes) app.append(n);
+
   renderScores(s);
 }
 
@@ -668,7 +570,12 @@ function renderBoardGame(s: RoomState): void {
 function renderPhoneLobby(s: RoomState): void {
   app.append(el(`<div><div class="brand">Games With Words</div><h2>You're in!</h2></div>`));
   app.append(playerList(s));
-  const start = el(`<button class="go"${s.players.length < 2 ? " disabled" : ""}>Start Say Less${s.players.length < 2 ? " (need 2+)" : ""}</button>`);
+  // The floor is the GAME's, not a hardcoded 2 — Ghostwriter needs three, and a
+  // button that starts an unplayable session is worse than a disabled one.
+  const view = currentView();
+  const floor = tiles.find((t) => t.gameId === gameId)?.minPlayers ?? 2;
+  const short = s.players.length < floor;
+  const start = el(`<button class="go"${short ? " disabled" : ""}>Start ${esc(view.title)}${short ? ` (need ${floor}+)` : ""}</button>`);
   start.addEventListener("click", () => socket?.send({ type: "game.start" }));
   app.append(start);
   app.append(el(`<p class="dim small" style="text-align:center">Anyone can start. A random player becomes the host.</p>`));
@@ -676,146 +583,33 @@ function renderPhoneLobby(s: RoomState): void {
 
 function renderPhoneGame(s: RoomState): void {
   const g = s.game!;
-  const round = g.round;
-  const role = roleOf(s);
+  const view = currentView();
+  const role = view.role?.(s) ?? roleOf(s);
   const clock = countdown(s);
 
-  app.append(el(`<div class="row"><span class="rolepill ${role}">${role}</span><span class="grow"></span><span class="dim small">Round ${g.roundIndex + 1}</span></div>`));
+  app.append(el(`<div class="row"><span class="rolepill ${esc(role)}">${esc(role)}</span><span class="grow"></span><span class="dim small">Round ${g.roundIndex + 1}</span></div>`));
   if (clock !== undefined) app.append(clock);
   const cap = caption(s);
   if (cap !== undefined) app.append(cap);
 
-  if (round === undefined || round.phase === "COMPLETE") { renderBetweenRounds(s); return; }
-
-  // The ballot replaces the guessing UI entirely — one job per screen.
-  const phoneBallot = ballotPhone(s);
-  if (phoneBallot !== undefined) {
-    app.append(el(`<div class="card"><div class="cluebox">“${esc(round.clue ?? "")}”</div><div class="budget">by ${esc(nameOf(s, round.speakerId))}</div></div>`));
-    app.append(phoneBallot);
-    renderScores(s);
-    return;
-  }
-
-  // Speaker: the secret card lives here and only here.
-  if (role === "SPEAKER") {
-    if (s.secret !== undefined) {
-      const c = s.secret;
-      app.append(el(`<div class="card secretcard stack">
-        <div class="small dim" style="text-align:center">YOUR SECRET · ${esc(c.card.category)} · don't say the red words</div>
-        <div class="secretword">${esc(c.card.secret)}</div>
-        <div class="forbidden">${c.card.forbidden.map((f) => `<span>${esc(f)}</span>`).join("")}</div>
-        <div class="budget">Make them say it — up to ${c.budget} words</div>
-      </div>`));
-    } else {
-      app.append(el(`<div class="card">Fetching your secret…</div>`));
-    }
-    if (round.phase === "AWAITING_CLUE") {
-      // A textarea, not an input: the budget now runs to 20 words, and a
-      // sentence that long scrolls out of sight in a single-line field on a
-      // phone. You cannot edit what you cannot read.
-      const form = el(`<div class="card stack composer">
-        <textarea id="clue" rows="3" placeholder="Write the clue that makes them say it…"
-               autocomplete="off" autocorrect="on" spellcheck="false" enterkeyhint="send"></textarea>
-        <div id="count" class="wordcount">0 / ${round.budget} words</div>
-        <button id="send">Send clue to the room</button>
-      </div>`);
-      const input = form.querySelector("#clue") as HTMLTextAreaElement;
-      const count = form.querySelector("#count") as HTMLElement;
-      const send = form.querySelector("#send") as HTMLButtonElement;
-      // The budget is a CEILING, never a quota — a three-word clue that lands is
-      // a perfectly good round. So the counter only ever objects to going OVER,
-      // and never nags you toward spending the rest of it.
-      const words = (): number => input.value.trim().split(/\s+/).filter((w) => w.length > 0).length;
-      const refresh = (): void => {
-        const n = words();
-        const over = n > round.budget;
-        count.textContent = over
-          ? `${n} / ${round.budget} words — ${n - round.budget} over`
-          : `${n} / ${round.budget} words`;
-        count.classList.toggle("over", over);
-        send.disabled = over || n === 0;
-      };
-      const submit = (): void => {
-        if (words() > 0 && words() <= round.budget) command("clue.submit", { clue: input.value.trim() });
-      };
-      input.addEventListener("input", refresh);
-      send.addEventListener("click", submit);
-      // Enter sends; Shift+Enter is a real newline, since this is prose now.
-      input.addEventListener("keydown", (e) => {
-        const ev = e as KeyboardEvent;
-        if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); submit(); }
-      });
-      refresh();
-      app.append(form);
-    } else if (round.phase === "GUESSING") {
-      app.append(el(`<div class="card"><div class="cluebox">“${esc(round.clue ?? "")}”</div><div class="budget">Clue is out — watch them squirm.</div></div>`));
-      const feed = guessFeed(s);
-      if (feed !== undefined) app.append(feed);
-    }
-  }
-
-  // Everyone else: the clue and the one-shot guess.
-  if (role !== "SPEAKER") {
-    if (round.phase === "AWAITING_CLUE") {
-      app.append(el(`<div class="card"><h2>${esc(nameOf(s, round.speakerId))} is thinking…</h2><p class="dim">Category: ${esc(round.category)} · up to ${round.budget} words. Get ready.</p></div>`));
-    }
-    if (round.phase === "GUESSING") {
-      app.append(el(`<div class="card"><div class="cluebox">“${esc(round.clue ?? "")}”</div><div class="budget">by ${esc(nameOf(s, round.speakerId))} · what's the secret?</div></div>`));
-      if (hasGuessed(s)) {
-        app.append(el(`<p class="dim" style="text-align:center">Your one guess is in. Sweat it out.</p>`));
-      } else {
-        const form = el(`<div class="card stack composer">
-          <input id="guess" type="text" placeholder="One guess. Make it count."
-                 autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="send" />
-          <button id="send" class="go">Guess!</button>
-        </div>`);
-        const input = form.querySelector("#guess") as HTMLInputElement;
-        const submit = () => { if (input.value.trim().length > 0) command("guess.submit", { value: input.value.trim() }); };
-        form.querySelector("#send")!.addEventListener("click", submit);
-        input.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") submit(); });
-        app.append(form);
-      }
-      const feed = guessFeed(s);
-      if (feed !== undefined) app.append(feed);
-    }
-  }
-
-  if (round.phase === "VOTING") {
-    app.append(el(`<div class="card"><h2>Loophole vote</h2><p class="dim">${esc(s.flagged?.reason ?? "That clue looks suspicious.")} Argue it out loud!</p></div>`));
-    if (amHost(s)) {
-      const row = el(`<div class="row"><button class="go" id="allow">Allow it</button><button class="danger" id="reject">Reject it</button></div>`);
-      row.querySelector("#allow")!.addEventListener("click", () => command("vote.resolve", { allow: true }));
-      row.querySelector("#reject")!.addEventListener("click", () => command("vote.resolve", { allow: false }));
-      app.append(row);
-    } else {
-      app.append(el(`<p class="dim" style="text-align:center">The host taps the room's verdict.</p>`));
-    }
-  }
-
-  if (amHost(s) && round.phase !== "VOTING") {
-    const end = el(`<button class="secondary">End round (host)</button>`);
-    end.addEventListener("click", () => command("round.end"));
-    app.append(end);
-  }
+  /**
+   * An empty node list means "nothing for a phone to do in this phase" — which
+   * is how a game tells the platform the round is over without the platform ever
+   * learning its phase names. Say Less returns [] on COMPLETE; so does
+   * Ghostwriter; so will the next game.
+   */
+  const nodes = view.phone(s, helpers);
+  if (nodes.length === 0) { renderBetweenRounds(s); return; }
+  for (const n of nodes) app.append(n);
 
   renderScores(s);
 }
 
 function renderBetweenRounds(s: RoomState): void {
-  const r = s.lastReveal;
-  const round = s.game?.round;
-  const reveal = revealPanel(s);
-  if (r !== undefined) {
-    app.append(el(`<div class="card reveal stack">
-      <div class="small dim">THE ANSWER WAS</div>
-      <div class="word">${esc(r.secret)}</div>
-      ${round?.revealLine !== undefined ? `<div class="dim revealline">“${esc(round.revealLine)}”</div>` : ""}
-      <div class="dim">${r.winnerId !== undefined ? `${esc(nameOf(s, r.winnerId))} got it!` : r.reason === "TIMEOUT" ? "Nobody got it." : "Round scrapped."}</div>
-    </div>`));
-  }
-  // Who wrote what, who was right, who the room crowned. The comedy that used
-  // to dribble out during guessing now lands here, all at once.
-  if (reveal !== undefined) app.append(reveal);
+  for (const n of currentView().betweenRounds(s, helpers)) app.append(n);
+
+  // The next-round button is platform furniture: every game has rounds, and the
+  // host starts them. `round.start` is the one command name the contract assumes.
   if (amHost(s)) {
     const next = el(`<button class="go">Next round</button>`);
     next.addEventListener("click", () => command("round.start"));
@@ -826,15 +620,20 @@ function renderBetweenRounds(s: RoomState): void {
   renderScores(s);
 }
 
-function renderScores(s: RoomState): void {
+/** The scoreboard as a node — shared furniture every game gets for free. */
+function scoreCard(s: RoomState): HTMLElement {
   const g = s.game;
-  if (g === undefined) return;
   const rows = [...s.players]
-    .map((p) => ({ p, score: g.scores[p.id] ?? 0 }))
+    .map((p) => ({ p, score: g?.scores[p.id] ?? 0 }))
     .sort((a, b) => b.score - a.score);
-  app.append(el(`<div class="card"><h2>Scores</h2><table class="scores">${rows
+  return el(`<div class="card"><h2>Scores</h2><table class="scores">${rows
     .map((r, i) => `<tr class="${i === 0 && r.score > 0 ? "winner" : ""}"><td>${esc(r.p.displayName)}${r.p.id === s.playerId ? " (you)" : ""}</td><td>${r.score}</td></tr>`)
-    .join("")}</table></div>`));
+    .join("")}</table></div>`);
+}
+
+function renderScores(s: RoomState): void {
+  if (s.game === undefined) return;
+  app.append(scoreCard(s));
 }
 
 function renderSummary(s: RoomState): void {
