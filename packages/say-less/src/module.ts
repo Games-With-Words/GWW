@@ -29,7 +29,24 @@ export const SAY_LESS_MANIFEST: GameManifest = {
     maker: "The Oracle",
     line: "Conceived by Interchained & The Oracle",
   },
-  minPlayers: 3,
+  /**
+   * TWO (Mark, 2026-08-25: "Say Less can be 2+").
+   *
+   * The engine already allowed it — createSession's floor has always been 2, and
+   * closeGuessing skips the community ballot below `minPlayersForBallot` (4),
+   * because a ballot needs at least two guesses to be a vote rather than a
+   * coronation. The only thing keeping a duo out of a room was THIS NUMBER,
+   * which the gateway reads as the lobby floor.
+   *
+   * At two it is Speaker plus one guesser: write the clue under the word
+   * budget, one person guesses, the round scores and the reveal lands. The
+   * ballot simply never opens, which is the same small-room path three players
+   * already took.
+   *
+   * Ghost Writer stays at 3 for a rules reason, not a symmetry one — see its
+   * manifest.
+   */
+  minPlayers: 2,
   maxPlayers: 12,
   sessionMinutes: [20, 35],
   categories: ["Family", "Adults", "Pop Culture", "Music", "Movies and TV", "Mixed Chaos"],

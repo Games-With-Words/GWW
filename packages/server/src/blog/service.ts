@@ -269,7 +269,7 @@ const PRODUCT_FACTS =
   "- Game two is Ghost Writer: everyone answers the same prompt on their phone, except one player — the Ghost — " +
   "who never sees the prompt and has to bluff an answer that fits. The room reads the answers aloud, votes on " +
   "which was written blind, and a caught Ghost gets one guess at what the question was.\n" +
-  "- Rounds are short. A session is 15 to 35 minutes. 3 to 12 players.\n" +
+  "- Rounds are short. A session is 15 to 35 minutes. Say Less plays with 2 to 12 people; Ghost Writer needs at least 3, because the room has to be able to out-vote the Ghost.\n" +
   "- There is a host voice called Ris who reads lines out on the TV between rounds.";
 
 export function draftSystemPrompt(knobs: Pick<BlogKnobs, "tone" | "minWords" | "maxWords">): string {

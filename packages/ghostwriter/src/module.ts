@@ -41,6 +41,15 @@ export const GHOSTWRITER_MANIFEST: GameManifest = {
     maker: "Vex",
     line: "Made by Vex — the inverse of Say Less",
   },
+  /**
+   * THREE, and this one cannot move (asked and answered, 2026-08-25).
+   *
+   * Say Less went to 2 the same day; this game mathematically cannot. At two
+   * players the vote is Writer and Ghost, neither may vote for their own slot,
+   * so each is forced onto the other: a guaranteed 1-1 tie, every round,
+   * forever. Ties acquit — so the Ghost could never be caught, which is the
+   * entire game. Three is the smallest room where a vote can actually convict.
+   */
   minPlayers: 3,
   maxPlayers: 12,
   sessionMinutes: [15, 25],
