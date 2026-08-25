@@ -48,6 +48,53 @@ describe("mobile invariants", () => {
     expect(css).toContain("#app.board .composer { position: static");
   });
 
+  it("has a REAL share card, at the size scrapers expect", () => {
+    /**
+     * The site had no share metadata at all — a link into a group chat rendered
+     * as a bare URL, which for a party game is the worst possible first
+     * impression: the whole product is "send this to your friends".
+     *
+     * The image is rendered from og-card.html in the games' own vendored type
+     * rather than generated, because a share preview of a WORD game should show
+     * the words. Checked here for real bytes and real dimensions — a 404 og:image
+     * is indistinguishable from no og:image, and neither shows up in review.
+     */
+    const html = readFileSync(join(import.meta.dirname, "../index.html"), "utf8");
+    for (const tag of ["og:title", "og:description", "og:image", "og:url", "og:type", "twitter:card"]) {
+      expect(html, `missing ${tag}`).toContain(tag);
+    }
+    // Scrapers do not resolve relative paths.
+    expect(html).toMatch(/og:image"\s+content="https:\/\//);
+    expect(html).toContain('content="summary_large_image"');
+
+    const jpg = readFileSync(join(import.meta.dirname, "../public/og.jpg"));
+    expect(jpg.length).toBeGreaterThan(10_000);
+
+    // Read the real SOF dimensions out of the JPEG rather than trusting the meta.
+    let w = 0, h = 0, i = 2;
+    while (i < jpg.length - 9) {
+      if (jpg[i] !== 0xff) { i += 1; continue; }
+      const marker = jpg[i + 1]!;
+      if (marker === 0xc0 || marker === 0xc1 || marker === 0xc2) {
+        h = jpg.readUInt16BE(i + 5); w = jpg.readUInt16BE(i + 7); break;
+      }
+      if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7)) { i += 2; continue; }
+      i += 2 + jpg.readUInt16BE(i + 2);
+    }
+    expect({ w, h }).toEqual({ w: 1200, h: 630 });
+    // And the declared size must match the actual file.
+    expect(html).toContain('og:image:width" content="1200"');
+    expect(html).toContain('og:image:height" content="630"');
+  });
+
+  it("does not answer its own hook on the share card", () => {
+    // The first render marked which answer was written blind with a red dot,
+    // directly under the line asking which one it was.
+    const card = readFileSync(join(import.meta.dirname, "../og-card.html"), "utf8");
+    expect(card).toContain("written blind");
+    expect(card).not.toMatch(/class="row blind"/);
+  });
+
   it("declares a viewport that respects the notch", () => {
     const html = readFileSync(join(import.meta.dirname, "../index.html"), "utf8");
     expect(html).toContain("viewport-fit=cover");
